@@ -448,6 +448,10 @@ namespace TAS.Server.MediaOperation
                 destMedia.Verify(true);
                 destMedia.TcPlay = destMedia.TcStart;
                 destMedia.DurationPlay = destMedia.Duration;
+                // Verification saves before these final playback properties are assigned.
+                // Persist the completed broadcast ingest, including its nonzero timecode.
+                if (broadcast)
+                    (destMedia as PersistentMedia)?.Save();
                 ((MediaDirectoryBase)DestDirectory).RefreshVolumeInfo();
                 if (Math.Abs(destMedia.Duration.Ticks - (IsTrimmed() ? Duration.Ticks : localSourceMedia.Duration.Ticks)) > TimeSpan.TicksPerSecond / 2)
                 {
