@@ -50,6 +50,11 @@ namespace TAS.Client.ViewModels
             _destCategory = ((IIngestDirectory)operation.Source.Directory).MediaCategory;
             IsMovie = operation.Source.MediaType == TMediaType.Unknown || operation.Source.MediaType == TMediaType.Movie;
             IsStill = operation.Source.MediaType == TMediaType.Still;
+            if (IsMovie && ((IIngestDirectory)operation.Source.Directory).BroadcastReadyV1)
+            {
+                _destMediaVideoFormat = TVideoFormat.HD1080i5000;
+                _destVideoFormatSelected = true;
+            }
             _audioChannelMappingConversion = operation.AudioChannelMappingConversion;
             _aspectConversion = operation.AspectConversion;
             _audioVolume = operation.AudioVolume;
@@ -108,7 +113,7 @@ namespace TAS.Client.ViewModels
 
         public bool EncodeAudio => ((IIngestDirectory)_operation.Source.Directory).AudioCodec != TAudioCodec.copy;
 
-        public bool CanChooseVideoFormat => IsStill || EncodeVideo;
+        public bool CanChooseVideoFormat => (IsStill || EncodeVideo) && !((IIngestDirectory)_operation.Source.Directory).BroadcastReadyV1;
         public Array SourceColorSpaces { get; } = Enum.GetValues(typeof(IngestColorSpace));
         public IngestColorSpace SourceColorSpace { get => _sourceColorSpace; set => SetField(ref _sourceColorSpace, value); }
 

@@ -24,6 +24,8 @@ namespace TAS.Client.Config.Model
         public double AudioVolume { get; set; }
         [DefaultValue(false)]
         public bool DeleteSource { get; set; }
+        [DefaultValue(false)]
+        public bool BroadcastReadyV1 { get; set; }
         [DefaultValue(TIngestDirectoryKind.WatchFolder)]
         public TIngestDirectoryKind Kind { get; set; } = TIngestDirectoryKind.WatchFolder;
         [DefaultValue(false)]

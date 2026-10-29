@@ -31,8 +31,21 @@ namespace TAS.Server.Media
 
         public bool DeleteSource { get; set; }
 
+        [DefaultValue(false)]
+        [DtoMember]
+        public bool BroadcastReadyV1 { get; set; }
+
+        internal void ValidateBroadcastReadyV1()
+        {
+            if (BroadcastReadyV1 && (DeleteSource || VideoCodec != TVideoCodec.libx264 ||
+                AudioCodec != TAudioCodec.pcm_s24le || AspectConversion != TAspectConversion.NoConversion ||
+                !string.IsNullOrWhiteSpace(EncodeParams)))
+                throw new InvalidOperationException("EWTN Broadcast Ready v1 requires libx264, pcm_s24le, NoConversion, empty EncodeParams and DeleteSource=false.");
+        }
+
         public override async Task Initialize()
         {
+            ValidateBroadcastReadyV1();
             if (!string.IsNullOrWhiteSpace(Folder))
             {
                 if (Folder.StartsWith("ftp://"))

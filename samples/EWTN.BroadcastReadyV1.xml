@@ -1,0 +1,15 @@
+<IngestDirectory>
+  <DirectoryName>EWTN Broadcast Ready v1</DirectoryName>
+  <Folder>D:\EWTN\Ingest\BroadcastReadyV1</Folder>
+  <Kind>WatchFolder</Kind>
+  <IsImport>true</IsImport>
+  <IsRecursive>false</IsRecursive>
+  <BroadcastReadyV1>true</BroadcastReadyV1>
+  <DeleteSource>false</DeleteSource>
+  <VideoCodec>libx264</VideoCodec>
+  <AudioCodec>pcm_s24le</AudioCodec>
+  <AspectConversion>NoConversion</AspectConversion>
+  <EncodeParams />
+  <MediaLoudnessCheckAfterIngest>false</MediaLoudnessCheckAfterIngest>
+  <Extensions><Extension>.mov</Extension><Extension>.mp4</Extension><Extension>.mpg</Extension><Extension>.mxf</Extension><Extension>.avi</Extension><Extension>.mkv</Extension><Extension>.m4v</Extension></Extensions>
+</IngestDirectory>

@@ -35,13 +35,14 @@ internal static class Program
     {
         try
         {
-            if (args.Length == 5 && args[0] == "--command")
+            if (args.Length == 5 && (args[0] == "--command" || args[0] == "--command-v1"))
             {
                 var info = BroadcastProbe.Read(args[1], args[2]);
-                Console.WriteLine(BroadcastIngest.Build(info, args[2], args[3], TVideoCodec.mpeg2video,
+                var v1 = args[0] == "--command-v1";
+                Console.WriteLine(BroadcastIngest.Build(info, args[2], args[3], v1 ? TVideoCodec.libx264 : TVideoCodec.mpeg2video,
                     TAudioCodec.pcm_s24le, (IngestColorSpace)Enum.Parse(typeof(IngestColorSpace), args[4]),
                     TFieldOrder.Unknown, TAspectConversion.NoConversion, TAudioChannelMappingConversion.FirstTwoChannels,
-                    0, 60, 20, "", "00:01:00:00"));
+                    0, 60, 20, "", "00:01:00:00", v1));
                 return 0;
             }
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("uk-UA");
@@ -80,6 +81,26 @@ internal static class Program
             Check(Build(mono).Contains("pan=stereo|c0=c0|c1=c0"), "mono dual-channel");
             var silent = Input(); silent.Streams = new[] { silent.Streams[0] };
             Check(Build(silent).Contains("anullsrc=channel_layout=stereo:sample_rate=48000") && Build(silent).Contains("-shortest"), "silent video gets bounded stereo silence");
+            Func<BroadcastProbe, string, TVideoCodec, TAudioCodec, string> ready = (probe, extra, codec, audio) =>
+                BroadcastIngest.Build(probe, "D:\\input.mov", "D:\\output.mov", codec, audio, IngestColorSpace.Auto,
+                    TFieldOrder.Unknown, TAspectConversion.NoConversion, TAudioChannelMappingConversion.FirstTwoChannels,
+                    0, 60, 20, extra, "00:01:00:00", true);
+            foreach (var rate in new[] { "24000/1001", "24/1", "25/1", "50/1" })
+            {
+                var command = ready(Input(rate), "", TVideoCodec.libx264, TAudioCodec.pcm_s24le);
+                Check(command.Contains("-profile:v high") && command.Contains("-b:v 12M -maxrate 12M -bufsize 24M") && command.Contains("-pix_fmt yuv420p"), rate + " fixed Ready v1 AVC420 High12M");
+                Check(command.IndexOf("interlace=scan=tff", StringComparison.Ordinal) < command.IndexOf("scale=iw:ih:interl=1,format=yuv420p", StringComparison.Ordinal), rate + " field-aware chroma AFTER temporal interlace");
+            }
+            foreach (var fields in new[] { "tt", "bb" })
+            {
+                var command = ready(Input("25/1", fields), "", TVideoCodec.libx264, TAudioCodec.pcm_s24le);
+                Check(command.Contains("fieldorder=tff") && command.Contains("scale=iw:ih:interl=1,format=yuv420p"), fields + " interlaced chroma path");
+            }
+            Reject(() => ready(Input(), "-b:v 8M", TVideoCodec.libx264, TAudioCodec.pcm_s24le), "Ready v1 bitrate override");
+            Reject(() => ready(Input(), "", TVideoCodec.copy, TAudioCodec.pcm_s24le), "Ready v1 copy");
+            Reject(() => ready(Input(), "", TVideoCodec.libx264, TAudioCodec.aac), "Ready v1 non-PCM24");
+            var surround = Input(); surround.Streams[1].Channels = 6;
+            Reject(() => ready(surround, "", TVideoCodec.libx264, TAudioCodec.pcm_s24le), "Ready v1 multichannel default selection");
             Console.WriteLine("ALL " + checks + " CHECKS PASS"); return 0;
         }
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }

@@ -20,6 +20,7 @@ namespace TAS.Client.Config
         private TAspectConversion _aspectConversion;
         private double _audioVolume;
         private bool _deleteSource;
+        private bool _broadcastReadyV1;
         private TIngestDirectoryKind _kind;
         private bool _isWAN;
         private bool _isRecursive;
@@ -105,6 +106,23 @@ namespace TAS.Client.Config
         {
             get => _deleteSource;
             set => SetField(ref _deleteSource, value);
+        }
+
+        public bool BroadcastReadyV1
+        {
+            get => _broadcastReadyV1;
+            set
+            {
+                if (!SetField(ref _broadcastReadyV1, value)) return;
+                if (value)
+                {
+                    DeleteSource = false;
+                    VideoCodec = TVideoCodec.libx264;
+                    AudioCodec = TAudioCodec.pcm_s24le;
+                    AspectConversion = TAspectConversion.NoConversion;
+                    EncodeParams = null;
+                }
+            }
         }
 
         public TIngestDirectoryKind Kind

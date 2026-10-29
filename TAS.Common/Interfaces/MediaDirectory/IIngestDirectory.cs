@@ -15,6 +15,8 @@ namespace TAS.Common.Interfaces.MediaDirectory
         TAspectConversion AspectConversion { get; }
         double AudioVolume { get;  }
         bool DeleteSource { get; }
+        // Fixed EWTN movie delivery policy; false preserves legacy profiles.
+        bool BroadcastReadyV1 { get; }
         bool IsExport { get; }
         bool IsImport { get; }
         TVideoCodec VideoCodec { get; }

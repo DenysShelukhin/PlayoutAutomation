@@ -9,10 +9,10 @@
     <CodeAnalysisRuleSet>ManagedMinimumRules.ruleset</CodeAnalysisRuleSet>
     <SatelliteResourceLanguages>pl</SatelliteResourceLanguages>
     <Product>TVPlay - Open source play-out automation</Product>
-    <AssemblyVersion>1.8.9390.1</AssemblyVersion>
-    <InformationalVersion>1.8.9390-ewtn.1</InformationalVersion>
+    <AssemblyVersion>1.8.9390.2</AssemblyVersion>
+    <InformationalVersion>1.8.9390-ewtn.2</InformationalVersion>
     <Version>$(TVPlayVersion)</Version>
-    <FileVersion>1.8.9390.1</FileVersion>
+    <FileVersion>1.8.9390.2</FileVersion>
     <Copyright>2025 Jerzy Jaśkiewicz</Copyright>
     <Authors>Jerzy Jaśkiewicz</Authors>
     <NoWarn>$(NoWarn);CS7035</NoWarn>

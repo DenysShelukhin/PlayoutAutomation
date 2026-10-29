@@ -46,6 +46,7 @@
             <Label Content="Directory kind"/>
             <ComboBox ItemsSource="{Binding IngestDirectoryKinds}" SelectedItem="{Binding Kind}"/>
             <CheckBox IsChecked="{Binding IsImport}" Content="Allow import from this directory"/>
+            <CheckBox IsChecked="{Binding BroadcastReadyV1}" Content="EWTN Broadcast Ready v1: fixed 1080i50 AVC420 12M / PCM24; preserve source"/>
             <StackPanel Visibility="{Binding IsImport, Converter={StaticResource BoolToVis}}">
                 <TextBlock TextWrapping="WrapWithOverflow">
                 Monitored filename extensions (e.g.: .mov;.mxf), <LineBreak/>

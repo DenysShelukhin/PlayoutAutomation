@@ -127,6 +127,16 @@ namespace TAS.Server.MediaOperation
             {
                 if (!(Source is IngestMedia sourceMedia))
                     throw new ArgumentException("IngestOperation: Source is not of type IngestMedia");
+                var policyDirectory = (IngestDirectory)sourceMedia.Directory;
+                policyDirectory.ValidateBroadcastReadyV1();
+                if (policyDirectory.BroadcastReadyV1)
+                {
+                    if (DestProperties == null || DestProperties.MediaType != TMediaType.Movie)
+                        throw new InvalidOperationException("Broadcast Ready v1 imports movies only.");
+                    DestProperties.VideoFormat = TVideoFormat.HD1080i5000;
+                    if (!string.Equals(Path.GetExtension(DestProperties.FileName), ".mov", StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("Broadcast Ready v1 destination must be MOV.");
+                }
                 sourceMedia.NotifyIngestStatusUpdated(DestDirectory as ServerDirectory, TIngestStatus.InProgress);
                 if (((IngestDirectory)sourceMedia.Directory).AccessType != TDirectoryAccessType.Direct)
                     using (var localSourceMedia = (TempMedia)TempDirectory.Current.CreateMedia(sourceMedia))
@@ -409,6 +419,8 @@ namespace TAS.Server.MediaOperation
             destMedia.MediaStatus = TMediaStatus.Copying;
             if (!(Source is MediaBase mediaBase && mediaBase.Directory is IngestDirectory ingestDirectory))
                 throw new ApplicationException("Media not belongs to IngestDirectory");
+            if (ingestDirectory.BroadcastReadyV1 && string.Equals(Path.GetFullPath(localSourceMedia.FullPath), Path.GetFullPath(destMedia.FullPath), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Broadcast Ready v1 never overwrites its source.");
             var broadcast = destMedia.VideoFormat == TVideoFormat.HD1080i5000 && ingestDirectory.VideoCodec != TVideoCodec.copy;
             string Params;
             if (broadcast)
@@ -423,7 +435,7 @@ namespace TAS.Server.MediaOperation
                     AspectConversion, AudioChannelMappingConversion, AudioVolume,
                     IsTrimmed() ? (StartTC - Source.TcStart).TotalSeconds : 0,
                     IsTrimmed() ? (double?)Duration.TotalSeconds : null, ingestDirectory.EncodeParams,
-                    StartTC.ToSmpteTimecodeString(destMedia.FrameRate()));
+                    StartTC.ToSmpteTimecodeString(destMedia.FrameRate()), ingestDirectory.BroadcastReadyV1);
             }
             else
             {

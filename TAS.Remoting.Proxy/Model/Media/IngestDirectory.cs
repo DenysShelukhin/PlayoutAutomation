@@ -24,6 +24,9 @@ namespace TAS.Remoting.Model.Media
         [DtoMember(nameof(IIngestDirectory.DeleteSource))]
         private bool _deleteSource;
 
+        [DtoMember(nameof(IIngestDirectory.BroadcastReadyV1))]
+        private bool _broadcastReadyV1;
+
         [DtoMember(nameof(IIngestDirectory.EncodeParams))]
         private string _encodeParams;
 
@@ -110,6 +113,7 @@ namespace TAS.Remoting.Model.Media
         public double AudioVolume => _audioVolume;
 
         public bool DeleteSource => _deleteSource;
+        public bool BroadcastReadyV1 => _broadcastReadyV1;
 
         public string EncodeParams => _encodeParams;
 

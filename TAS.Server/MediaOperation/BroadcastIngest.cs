@@ -137,8 +137,10 @@ namespace TAS.Server.MediaOperation
         internal static string Build(BroadcastProbe info, string source, string destination, TVideoCodec videoCodec,
             TAudioCodec audioCodec, IngestColorSpace inputColor, TFieldOrder fieldOverride,
             TAspectConversion aspect, TAudioChannelMappingConversion mapping, double volume,
-            double start, double? duration, string additional, string timecode)
+            double start, double? duration, string additional, string timecode, bool broadcastReadyV1 = false)
         {
+            if (broadcastReadyV1 && (videoCodec != TVideoCodec.libx264 || audioCodec != TAudioCodec.pcm_s24le || !string.IsNullOrWhiteSpace(additional)))
+                throw new InvalidOperationException("Broadcast Ready v1 fixes AVC High420 12M and PCM24; codec/EncodeParams overrides are not allowed.");
             if (videoCodec != TVideoCodec.mpeg2video && videoCodec != TVideoCodec.libx264)
                 throw new InvalidOperationException("1080i50 requires an interlace-capable encoder: mpeg2video or libx264.");
             if (audioCodec == TAudioCodec.copy)
@@ -201,6 +203,8 @@ namespace TAS.Server.MediaOperation
             if (width != 1920 || height != 1080) vf.Add("pad=1920:1080:" + (1920 - width) / 2 + ":" + (1080 - height) / 2 + ":color=black");
             if (!interlaced) vf.Add("interlace=scan=tff");
             vf.Add("setfield=tff");
+            // Downsample chroma separately in each temporal field, AFTER TFF assembly.
+            if (broadcastReadyV1) vf.AddRange(new[] { "scale=iw:ih:interl=1", "format=yuv420p" });
             if (duration.HasValue) vf.Add("trim=duration=" + N(duration.Value));
             var graph = "[0:" + v.Index + "]" + string.Join(",", vf) + "[v];";
             var audio = info.Streams.FirstOrDefault(s => s.Type == "audio");
@@ -213,6 +217,8 @@ namespace TAS.Server.MediaOperation
             else
             {
                 if (audio.Channels <= 0) throw new InvalidOperationException("Audio channel count is unknown.");
+                if (broadcastReadyV1 && audio.Channels > 2 && (mapping == TAudioChannelMappingConversion.Default || mapping == TAudioChannelMappingConversion.FirstTwoChannels))
+                    throw new InvalidOperationException("Multichannel sources require an explicitly reviewed stereo selection/downmix; do not discard centre dialogue automatically.");
                 if (mapping == TAudioChannelMappingConversion.MergeAllChannels)
                     throw new InvalidOperationException("1080i50 requires a stereo channel selection, not MergeAllChannels.");
                 var pan = MediaConversion.AudioChannelMapingConversions[mapping].FFMpegFilter;
@@ -231,10 +237,12 @@ namespace TAS.Server.MediaOperation
             var ep = new StringBuilder(" -copyts -filter_complex_threads 2 -i " + BroadcastProbe.Quote(source));
             ep.Append(" -filter_complex \"").Append(graph).Append("\" -map \"[v]\" -map \"[a]\" -vsync 0");
             ep.Append(" -c:v ").Append(videoCodec);
-            if (videoCodec == TVideoCodec.mpeg2video) ep.Append(" -b:v 50M -minrate 50M -maxrate 50M -bufsize 17.8M -g 12 -bf 2 -dc 10");
+            if (broadcastReadyV1) ep.Append(" -preset fast -profile:v high -level:v 4.0 -b:v 12M -maxrate 12M -bufsize 24M -g 25 -bf 2 -x264-params tff=1:open-gop=0:nal-hrd=vbr");
+            else if (videoCodec == TVideoCodec.mpeg2video) ep.Append(" -b:v 50M -minrate 50M -maxrate 50M -bufsize 17.8M -g 12 -bf 2 -dc 10");
             else ep.Append(" -b:v 25M -g 25 -bf 2");
             ep.Append(AdditionalParameters(additional));
-            ep.Append(" -pix_fmt yuv422p -flags +ildct+ilme -top 1 -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -threads 2");
+            ep.Append(broadcastReadyV1 ? " -pix_fmt yuv420p" : " -pix_fmt yuv422p");
+            ep.Append(" -flags +ildct+ilme -top 1 -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -threads ").Append(broadcastReadyV1 ? "8" : "2");
             ep.Append(" -c:a ").Append(audioCodec);
             if (audioCodec != TAudioCodec.pcm_s16le && audioCodec != TAudioCodec.pcm_s24le) ep.Append(" -b:a 256k");
             ep.Append(" -ar 48000 -ac 2");
