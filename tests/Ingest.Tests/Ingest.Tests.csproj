@@ -1,0 +1,10 @@
+<!-- EWTN modified 2026-10-29: native 1080i50 ingest. GPL-2.0; see LICENSE. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net48</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\TAS.Server\MediaOperation\BroadcastIngest.cs" Link="BroadcastIngest.cs" />
+    <ProjectReference Include="..\..\TAS.Common\TAS.Common.csproj" />
+    <Reference Include="System.Runtime.Serialization" />
+  </ItemGroup>
+</Project>

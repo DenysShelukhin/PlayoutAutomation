@@ -1,6 +1,7 @@
+<!-- EWTN modified 2026-10-29: native 1080i50 ingest. GPL-2.0; see LICENSE. -->
 <Project>
   <PropertyGroup>
-    <TVPlayVersion>1.8.9314</TVPlayVersion>
+    <TVPlayVersion>1.8.9390</TVPlayVersion>
     <TargetFramework>net48</TargetFramework>
     <Platform>x64</Platform>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
@@ -8,9 +9,10 @@
     <CodeAnalysisRuleSet>ManagedMinimumRules.ruleset</CodeAnalysisRuleSet>
     <SatelliteResourceLanguages>pl</SatelliteResourceLanguages>
     <Product>TVPlay - Open source play-out automation</Product>
-    <AssemblyVersion>1.8.*</AssemblyVersion>
+    <AssemblyVersion>1.8.9390.1</AssemblyVersion>
+    <InformationalVersion>1.8.9390-ewtn.1</InformationalVersion>
     <Version>$(TVPlayVersion)</Version>
-    <FileVersion>$(TVPlayVersion)</FileVersion>
+    <FileVersion>1.8.9390.1</FileVersion>
     <Copyright>2025 Jerzy Jaśkiewicz</Copyright>
     <Authors>Jerzy Jaśkiewicz</Authors>
     <NoWarn>$(NoWarn);CS7035</NoWarn>

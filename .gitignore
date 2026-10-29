@@ -22,3 +22,6 @@ packages
 /TAS.FFMpegUtils/x64
 /TAS.Client.Common/*.DotSettings
 /publish
+/.buildtools/
+/.artifacts/
+*_wpftmp.csproj

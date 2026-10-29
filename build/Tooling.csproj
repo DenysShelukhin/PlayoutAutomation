@@ -1,0 +1,11 @@
+<!-- EWTN modified 2026-10-29: native 1080i50 ingest. GPL-2.0; see LICENSE. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net48</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems><RestorePackagesWithLockFile>true</RestorePackagesWithLockFile></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Build.Runtime" Version="17.10.4" />
+    <PackageReference Include="NuGet.Build.Tasks" Version="6.10.0" />
+    <PackageReference Include="Microsoft.Net.Compilers.Toolset" Version="4.10.0" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net45" Version="1.0.3" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3" ExcludeAssets="all" />
+  </ItemGroup>
+</Project>

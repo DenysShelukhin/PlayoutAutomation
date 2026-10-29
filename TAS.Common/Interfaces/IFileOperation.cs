@@ -1,4 +1,5 @@
-﻿using System;
+// EWTN modified 2026-10-29: native 1080i50 ingest. GPL-2.0; see LICENSE.
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using TAS.Common.Interfaces.Media;
@@ -55,6 +56,7 @@ namespace TAS.Common.Interfaces
         TAspectConversion AspectConversion { get; set; }
         TAudioChannelMappingConversion AudioChannelMappingConversion { get; set; }
         TFieldOrder SourceFieldOrderEnforceConversion { get; set; }
+        IngestColorSpace SourceColorSpace { get; set; }
         double AudioVolume { get; set; }
         bool Trim { get; set; }
         bool LoudnessCheck { get; set; }

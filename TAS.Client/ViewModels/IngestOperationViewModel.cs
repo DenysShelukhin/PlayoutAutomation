@@ -1,4 +1,5 @@
-﻿using System;
+// EWTN modified 2026-10-29: native 1080i50 ingest. GPL-2.0; see LICENSE.
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
@@ -33,6 +34,8 @@ namespace TAS.Client.ViewModels
         private string _destFileName;
         private TMediaEmphasis _destMediaEmphasis;
         private TVideoFormat _destMediaVideoFormat;
+        private bool _destVideoFormatSelected;
+        private IngestColorSpace _sourceColorSpace;
         private DateTime _killDate;
 
         public IngestOperationViewModel(IIngestOperation operation, IEngine engine)
@@ -51,6 +54,7 @@ namespace TAS.Client.ViewModels
             _aspectConversion = operation.AspectConversion;
             _audioVolume = operation.AudioVolume;
             _sourceFieldOrderEnforceConversion = operation.SourceFieldOrderEnforceConversion;
+            _sourceColorSpace = operation.SourceColorSpace;
             _loudnessCheck = operation.LoudnessCheck;
             operation.Source.PropertyChanged += OnSourceMediaPropertyChanged;
             AspectConversionsEnforce = new TAspectConversion[3];
@@ -103,6 +107,10 @@ namespace TAS.Client.ViewModels
         public bool EncodeVideo => ((IIngestDirectory)_operation.Source.Directory).VideoCodec != TVideoCodec.copy;
 
         public bool EncodeAudio => ((IIngestDirectory)_operation.Source.Directory).AudioCodec != TAudioCodec.copy;
+
+        public bool CanChooseVideoFormat => IsStill || EncodeVideo;
+        public Array SourceColorSpaces { get; } = Enum.GetValues(typeof(IngestColorSpace));
+        public IngestColorSpace SourceColorSpace { get => _sourceColorSpace; set => SetField(ref _sourceColorSpace, value); }
 
         public bool Trim
         {
@@ -223,6 +231,7 @@ namespace TAS.Client.ViewModels
             get => _destMediaVideoFormat;
             set
             {
+                _destVideoFormatSelected = true;
                 if (!SetField(ref _destMediaVideoFormat, value))
                     return;
                 NotifyPropertyChanged(nameof(IsValid));
@@ -256,6 +265,7 @@ namespace TAS.Client.ViewModels
             _operation.StartTC = StartTC;
             _operation.Duration = Duration;
             _operation.SourceFieldOrderEnforceConversion = _sourceFieldOrderEnforceConversion;
+            _operation.SourceColorSpace = _sourceColorSpace;
             _operation.AudioChannelMappingConversion = _audioChannelMappingConversion;
             _operation.AspectConversion = _aspectConversion;
             _operation.SourceFieldOrderEnforceConversion = _sourceFieldOrderEnforceConversion;
@@ -358,7 +368,11 @@ namespace TAS.Client.ViewModels
                     StartTC = _operation.Source.TcPlay;
                     break;
                 case (nameof(IMedia.VideoFormat)):
-                    DestMediaVideoFormat = _operation.Source.VideoFormat;
+                    if (!_destVideoFormatSelected)
+                    {
+                        _destMediaVideoFormat = _operation.Source.VideoFormat;
+                        NotifyPropertyChanged(nameof(DestMediaVideoFormat));
+                    }
                     break;
                 case nameof(IMedia.IsVerified):
                     NotifyPropertyChanged(nameof(IsValid));

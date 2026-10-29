@@ -1,0 +1,12 @@
+<Project>
+  <!-- EWTN additions 2026-10-29. GPL-2.0; see LICENSE. -->
+  <!-- Optional managed-only build. The native wrapper is not changed by the EWTN ingest fix. -->
+  <Target Name="EwtnUseUnmodifiedVendorFFmpeg" BeforeTargets="AssignProjectConfiguration;_GetProjectReferenceTargetFrameworkProperties"
+          Condition="'$(MSBuildProjectName)' == 'TAS.Server' and '$(EwtnVendorNativeAssembly)' != ''">
+    <Error Condition="!Exists('$(EwtnVendorNativeAssembly)')" Text="The unmodified vendor TAS.FFMpegUtils.dll is missing." />
+    <ItemGroup>
+      <ProjectReference Remove="..\TAS.FFMpegUtils\FFMpegUtils.vcxproj" />
+      <Reference Include="TAS.FFMpegUtils"><HintPath>$(EwtnVendorNativeAssembly)</HintPath></Reference>
+    </ItemGroup>
+  </Target>
+</Project>

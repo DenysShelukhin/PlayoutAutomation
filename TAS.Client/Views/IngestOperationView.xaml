@@ -1,4 +1,5 @@
-﻿<UserControl ResxExtension.DefaultResxName="TAS.Client.Views.IngestOperationView" Language="{UICulture}" 
+<!-- EWTN modified 2026-10-29: native 1080i50 ingest. GPL-2.0; see LICENSE. -->
+<UserControl ResxExtension.DefaultResxName="TAS.Client.Views.IngestOperationView" Language="{UICulture}"
              x:Class="TAS.Client.Views.IngestOperationView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -49,9 +50,9 @@
             <TextBox Text="{Binding IdAux, UpdateSourceTrigger=PropertyChanged, ValidatesOnDataErrors=True}" />
             <Label Content="{Resx _destFileName}" />
             <TextBox Text="{Binding DestFileName, UpdateSourceTrigger=PropertyChanged, ValidatesOnDataErrors=True}" />
-            <StackPanel Visibility="{Binding IsStill, Converter={StaticResource BoolToVis}}">
+            <StackPanel>
                 <Label Content="{Resx _videoFormat}" />
-                <ComboBox ItemsSource="{Binding VideoFormats}" SelectedValue="{Binding DestMediaVideoFormat, ValidatesOnDataErrors=True}" />
+                <ComboBox AutomationProperties.AutomationId="IngestTargetVideoFormat" IsEnabled="{Binding CanChooseVideoFormat}" ItemsSource="{Binding VideoFormats}" SelectedValue="{Binding DestMediaVideoFormat, ValidatesOnDataErrors=True}" />
             </StackPanel>
             <StackPanel Visibility="{Binding IsMovie, Converter={StaticResource BoolToVis}}">
                 <Label Content="{Resx _category}" />
@@ -101,6 +102,8 @@
             </Expander.Header>
             <StackPanel Width="300">
                 <StackPanel Visibility="{Binding EncodeVideo, Converter={StaticResource BoolToVis}}">
+                    <Label Content="1080i50 input SDR color (Auto requires tags)" />
+                    <ComboBox AutomationProperties.AutomationId="IngestSourceColorSpace" ItemsSource="{Binding SourceColorSpaces}" SelectedItem="{Binding SourceColorSpace}" />
                     <Label Content="{Resx _aspectCorrection}" />
                     <ComboBox ItemsSource="{Binding AspectConversions}" SelectedItem="{Binding AspectConversion}" />
                     <Label Content="{Resx _fieldOrder}" />

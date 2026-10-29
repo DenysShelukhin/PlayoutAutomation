@@ -1,4 +1,5 @@
-﻿using jNet.RPC;
+// EWTN modified 2026-10-29: native 1080i50 ingest. GPL-2.0; see LICENSE.
+using jNet.RPC;
 using System;
 using TAS.Common;
 using TAS.Common.Interfaces;
@@ -34,6 +35,9 @@ namespace TAS.Remoting.Model.MediaOperation
         [DtoMember(nameof(IIngestOperation.SourceFieldOrderEnforceConversion))]
         private TFieldOrder _sourceFieldOrderEnforceConversion;
 
+        [DtoMember(nameof(IIngestOperation.SourceColorSpace))]
+        private IngestColorSpace _sourceColorSpace;
+
         [DtoMember(nameof(IIngestOperation.StartTC))]
         private TimeSpan _startTc;
 
@@ -62,6 +66,8 @@ namespace TAS.Remoting.Model.MediaOperation
         public double AudioVolume { get => _audioVolume; set => Set(value); }
 
         public TFieldOrder SourceFieldOrderEnforceConversion { get => _sourceFieldOrderEnforceConversion; set => Set(value); }
+
+        public IngestColorSpace SourceColorSpace { get => _sourceColorSpace; set => Set(value); }
 
         public TimeSpan StartTC { get => _startTc; set => Set(value); }
 

@@ -1,4 +1,5 @@
-﻿using System;
+// EWTN modified 2026-10-29: native 1080i50 ingest. GPL-2.0; see LICENSE.
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
@@ -29,6 +30,7 @@ namespace TAS.Server.MediaOperation
         private TAudioChannelMappingConversion _audioChannelMappingConversion;
         private double _audioVolume;
         private TFieldOrder _sourceFieldOrderEnforceConversion;
+        private IngestColorSpace _sourceColorSpace;
         private TimeSpan _startTc;
         private TimeSpan _duration;
         private bool _trim;
@@ -80,6 +82,13 @@ namespace TAS.Server.MediaOperation
         {
             get => _sourceFieldOrderEnforceConversion;
             set => SetField(ref _sourceFieldOrderEnforceConversion, value);
+        }
+
+        [DtoMember]
+        public IngestColorSpace SourceColorSpace
+        {
+            get => _sourceColorSpace;
+            set => SetField(ref _sourceColorSpace, value);
         }
 
         [DtoMember]
@@ -400,18 +409,38 @@ namespace TAS.Server.MediaOperation
             destMedia.MediaStatus = TMediaStatus.Copying;
             if (!(Source is MediaBase mediaBase && mediaBase.Directory is IngestDirectory ingestDirectory))
                 throw new ApplicationException("Media not belongs to IngestDirectory");
-            var encodeParams = GetEncodeParameters(ingestDirectory, localSourceMedia, streams);
-            var ingestRegion = IsTrimmed() ? string.Format(CultureInfo.InvariantCulture, " -ss {0} -t {1}", StartTC - Source.TcStart, Duration) : string.Empty;
-            var Params = string.Format(CultureInfo.InvariantCulture,
+            var broadcast = destMedia.VideoFormat == TVideoFormat.HD1080i5000 && ingestDirectory.VideoCodec != TVideoCodec.copy;
+            string Params;
+            if (broadcast)
+            {
+                if (ingestDirectory.DeleteSource)
+                    throw new InvalidOperationException("EWTN 1080i50 ingest requires DeleteSource=false.");
+                var metadata = BroadcastProbe.Read(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffprobe.exe"), localSourceMedia.FullPath);
+                var video = metadata.Streams.First(s => s.Type == "video");
+                AddOutputMessage(LogLevel.Info, $"EWTN1080i50 source {video.Width}x{video.Height}, fps={video.Rate}, avg={video.AverageRate}, fields={video.FieldOrder}, SAR={video.Sar}, DAR={video.Dar}, color={video.Primaries}/{video.Transfer}/{video.Matrix}/{video.Range}, interpretation={SourceColorSpace}");
+                Params = BroadcastIngest.Build(metadata, localSourceMedia.FullPath, destMedia.FullPath,
+                    ingestDirectory.VideoCodec, ingestDirectory.AudioCodec, SourceColorSpace, SourceFieldOrderEnforceConversion,
+                    AspectConversion, AudioChannelMappingConversion, AudioVolume,
+                    IsTrimmed() ? (StartTC - Source.TcStart).TotalSeconds : 0,
+                    IsTrimmed() ? (double?)Duration.TotalSeconds : null, ingestDirectory.EncodeParams,
+                    StartTC.ToSmpteTimecodeString(destMedia.FrameRate()));
+            }
+            else
+            {
+                var encodeParams = GetEncodeParameters(ingestDirectory, localSourceMedia, streams);
+                var ingestRegion = IsTrimmed() ? string.Format(CultureInfo.InvariantCulture, " -ss {0} -t {1}", StartTC - Source.TcStart, Duration) : string.Empty;
+                Params = string.Format(CultureInfo.InvariantCulture,
                 " -i \"{1}\"{0} -vsync cfr{2} -timecode {3} -y \"{4}\"",
                 ingestRegion,
                 localSourceMedia.FullPath,
                 encodeParams,
                 StartTC.ToSmpteTimecodeString(destMedia.FrameRate()),
                 destMedia.FullPath);
+            }
             if (Dest is ArchiveMedia)
                 FileUtils.CreateDirectoryIfNotExists(Path.GetDirectoryName(destMedia.FullPath));
             Dest.AudioChannelMapping = (TAudioChannelMapping)MediaConversion.AudioChannelMapingConversions[AudioChannelMappingConversion].OutputFormat;
+            if (broadcast) Dest.AudioChannelMapping = TAudioChannelMapping.Stereo;
             if (await helper.RunProcess(Params)  // FFmpeg 
                 && destMedia.FileExists())
             {
@@ -458,4 +487,3 @@ namespace TAS.Server.MediaOperation
     }
 
 }
- 
