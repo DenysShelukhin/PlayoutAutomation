@@ -46,6 +46,12 @@ internal static class Program
                 return 0;
             }
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("uk-UA");
+            var interlacedProducer = BroadcastPlayout.Producer("\"clip\"", true, true, TVideoFormat.HD1080i5000, TVideoFormat.HD1080i5000);
+            Check(interlacedProducer == "\"clip\" FILTER \"scale=iw:ih:interl=1,format=yuv422p\"", "1080i TVP producer expands chroma by field");
+            Check(BroadcastPlayout.Producer("\"clip\"", false, true, TVideoFormat.HD1080i5000, TVideoFormat.HD1080i5000) == "\"clip\"", "other server producer unchanged");
+            Check(BroadcastPlayout.Producer("\"clip\"", true, true, TVideoFormat.HD1080i5000, TVideoFormat.HD1080p2500) == "\"clip\"", "progressive output producer unchanged");
+            Check(BroadcastPlayout.Producer("\"clip\"", true, false, TVideoFormat.HD1080i5000, TVideoFormat.HD1080i5000) == "\"clip\"", "still producer unchanged");
+            Check(BroadcastPlayout.Producer("\"clip\"", true, true, TVideoFormat.HD1080p2500, TVideoFormat.HD1080i5000) == "\"clip\"", "progressive source producer unchanged");
             foreach (var rate in new[] { "24000/1001", "24/1", "25/1" })
             {
                 var command = Build(Input(rate));

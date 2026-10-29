@@ -626,6 +626,8 @@ namespace TAS.Server
             }
             if (aEvent.EventType == TEventType.Live)
                 item.Clipname = LiveDevice;
+            if (aEvent.EventType == TEventType.Movie)
+                item.Clipname = BroadcastProducer(item.Clipname, media);
             if (aEvent.IsMovieOrLive())
                 item.ChannelLayout = GetAudioChannelLayout();
             if (aEvent.EventType == TEventType.Movie && Owner.CasparServerType.IsForkTVP())
@@ -651,7 +653,7 @@ namespace TAS.Server
             {
                 return new Svt.Caspar.CasparItem(string.Empty)
                 {
-                    Clipname = $"\"{(media is ServerMedia ? Path.GetFileNameWithoutExtension(media.FileName) : media.FullPath)}\"",
+                    Clipname = BroadcastProducer($"\"{(media is ServerMedia ? Path.GetFileNameWithoutExtension(media.FileName) : media.FullPath)}\"", media),
                     ChannelLayout = GetAudioChannelLayout(),
                     VideoLayer = (int)videolayer,
                     Seek = (int)seek,
@@ -666,12 +668,16 @@ namespace TAS.Server
             if (media != null && (media.MediaType == TMediaType.Movie || media.MediaType == TMediaType.Still))
                 return new Svt.Caspar.CasparItem(string.Empty)
                 {
-                    Clipname = $"\"{(media is ServerMedia ? Path.GetFileNameWithoutExtension(media.FileName) : media.FullPath)}\"",
+                    Clipname = BroadcastProducer($"\"{(media is ServerMedia ? Path.GetFileNameWithoutExtension(media.FileName) : media.FullPath)}\"", media),
                     ChannelLayout = GetAudioChannelLayout(),
                     VideoLayer = (int)videolayer
                 };
             return null;
         }
+
+        private string BroadcastProducer(string quotedName, MediaBase media)
+            => MediaOperation.BroadcastPlayout.Producer(quotedName, Owner.CasparServerType.IsForkTVP(),
+                media.MediaType == TMediaType.Movie, media.VideoFormat, VideoFormat);
 
         private TVideoFormat CasparModeToVideoFormat(Svt.Caspar.VideoMode mode)
         {

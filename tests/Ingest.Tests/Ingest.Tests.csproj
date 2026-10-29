@@ -4,6 +4,7 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="..\..\TAS.Server\MediaOperation\BroadcastIngest.cs" Link="BroadcastIngest.cs" />
+    <Compile Include="..\..\TAS.Server\MediaOperation\BroadcastPlayout.cs" Link="BroadcastPlayout.cs" />
     <ProjectReference Include="..\..\TAS.Common\TAS.Common.csproj" />
     <Reference Include="System.Runtime.Serialization" />
   </ItemGroup>
