@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using jNet.RPC;
 using jNet.RPC.Client;
 using TAS.Common;
@@ -49,6 +49,8 @@ namespace TAS.Remoting.Model
 
         public IFileManager FileManager => _fileManager;
         [DtoMember(nameof(AutomationStatus))] private string _automationStatus;
+        [DtoMember(nameof(IncomingStatus))] private string _incomingStatus;
+        public string IncomingStatus => _incomingStatus;
         public string AutomationStatus => _automationStatus;
         [DtoMember(nameof(AutomationWarning))] private string _automationWarning;
         public string AutomationWarning => _automationWarning;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Globalization;
 using System.IO;
@@ -21,6 +21,8 @@ namespace TAS.Server
         private readonly ConcurrentDictionary<VideoLayer, bool> _outputAspectNarrow = new ConcurrentDictionary<VideoLayer, bool>();
         private readonly ConcurrentDictionary<VideoLayer, Event> _loadedNext = new ConcurrentDictionary<VideoLayer, Event>();
         private readonly ConcurrentDictionary<VideoLayer, Event> _visible = new ConcurrentDictionary<VideoLayer, Event>();
+        private readonly ConcurrentDictionary<VideoLayer, Guid> _directMedia = new ConcurrentDictionary<VideoLayer, Guid>();
+        internal bool UsesMedia(Guid id)=>_visible.Values.Any(e=>e.MediaGuid==id)||_loadedNext.Values.Any(e=>e.MediaGuid==id)||_directMedia.Values.Contains(id);
         private bool _isServerConnected;
         private int _audiolevel;
 
@@ -76,6 +78,8 @@ namespace TAS.Server
 
         public bool LoadNext(Event aEvent)
         {
+            lock (IncomingMediaGate.Sync) {
+
             var channel = _casparChannel;
             if (aEvent != null && CheckConnected(channel))
             {
@@ -93,10 +97,14 @@ namespace TAS.Server
             }
             Logger.Warn("CasparLoadNext did not load {0}", aEvent);
             return false;
-        }
+        
+            } // Incoming media access barrier
+}
 
         public bool Load(Event aEvent)
         {
+            lock (IncomingMediaGate.Sync) {
+
             var channel = _casparChannel;
             if (aEvent != null && CheckConnected(channel))
             {
@@ -106,6 +114,7 @@ namespace TAS.Server
                     if (item != null)
                     {
                         channel.Load(item);
+                        _directMedia.TryRemove(aEvent.Layer,out _);
                         if (aEvent.EventType == TEventType.Live)
                             channel.Play(item.VideoLayer);
                         _visible[aEvent.Layer] = aEvent;
@@ -117,10 +126,14 @@ namespace TAS.Server
             }
             Logger.Warn("Load did not load {0}", aEvent);
             return false;
-        }
+        
+            } // Incoming media access barrier
+}
 
         public bool Load(MediaBase media, VideoLayer videolayer, long seek, long duration)
         {
+            lock (IncomingMediaGate.Sync) {
+
             var channel = _casparChannel;
             if (!CheckConnected(channel) || media == null)
                 return false;
@@ -128,33 +141,44 @@ namespace TAS.Server
             if (item == null)
                 return false;
             item.Length = (int)duration;
+            _directMedia[videolayer]=media.MediaGuid;
             channel.Load(item);
             _visible.TryRemove(videolayer, out _);
             _loadedNext.TryRemove(videolayer, out _);
             Logger.Trace("Load media {0} Layer {1} Seek {2} Duration {3}", media, videolayer, seek, duration);
             return true;
-        }
+        
+            } // Incoming media access barrier
+}
 
         public bool Load(MediaBase media, VideoLayer videolayer)
         {
+            lock (IncomingMediaGate.Sync) {
+
             var channel = _casparChannel;
             if (!CheckConnected(channel) || media == null)
                 return false;
             var item = _getItem(media, videolayer);
             if (item == null)
                 return false;
+            _directMedia[videolayer]=media.MediaGuid;
             channel.Load(item);
             _visible.TryRemove(videolayer, out _);
             _loadedNext.TryRemove(videolayer, out _);
             Logger.Trace("Load media {0} Layer {1}", media, videolayer);
             return true;
-        }
+        
+            } // Incoming media access barrier
+}
 
         public bool Load(System.Drawing.Color color, VideoLayer videolayer)
         {
+            lock (IncomingMediaGate.Sync) {
+
             var channel = _casparChannel;
             if (!CheckConnected(channel))
                 return false;
+            _directMedia.TryRemove(videolayer,out _);
             var scolor = '#' + color.ToArgb().ToString("X8");
             var item = new Svt.Caspar.CasparItem((int)videolayer, scolor);
             channel.Load(item);
@@ -162,7 +186,9 @@ namespace TAS.Server
             _loadedNext.TryRemove(videolayer, out _);
             Logger.Trace("Load color {0} Layer {1}", scolor, videolayer);
             return true;
-        }
+        
+            } // Incoming media access barrier
+}
 
         public bool Seek(VideoLayer videolayer, long position)
         {
@@ -186,16 +212,22 @@ namespace TAS.Server
 
         public bool PlayLiveDevice(VideoLayer layer)
         {
+            lock (IncomingMediaGate.Sync) {
+
             if (string.IsNullOrEmpty(LiveDevice))
                 return false;
             var channel = _casparChannel;
             var item = new Svt.Caspar.CasparItem((int)layer, LiveDevice);
             channel?.LoadBG(item);
             return Play(layer); ;
-        }
+        
+            } // Incoming media access barrier
+}
 
         public bool Play(Event aEvent)
         {
+            lock (IncomingMediaGate.Sync) {
+
             var channel = _casparChannel;
             if (CheckConnected(channel))
             {
@@ -211,6 +243,7 @@ namespace TAS.Server
                         }
                     }
                     channel.Play((int)aEvent.Layer);
+                    _directMedia.TryRemove(aEvent.Layer,out _);
                     _visible[aEvent.Layer] = aEvent;
                     _loadedNext.TryRemove(aEvent.Layer, out _);
                     Logger.Trace("CasparPlay Layer {0}", aEvent.Layer);
@@ -264,10 +297,14 @@ namespace TAS.Server
                 }
             }
             return false;
-        }
+        
+            } // Incoming media access barrier
+}
 
         public bool Play(VideoLayer videolayer)
         {
+            lock (IncomingMediaGate.Sync) {
+
             var channel = _casparChannel;
             if (CheckConnected(channel))
             {
@@ -278,10 +315,14 @@ namespace TAS.Server
                 return true;
             }
             return false;
-        }
+        
+            } // Incoming media access barrier
+}
 
         public bool Stop(Event aEvent)
         {
+            lock (IncomingMediaGate.Sync) {
+
             var channel = _casparChannel;
             if (CheckConnected(channel))
             {
@@ -295,7 +336,9 @@ namespace TAS.Server
             }
             else
                 return false;
-        }
+        
+            } // Incoming media access barrier
+}
 
         public bool Pause(Event aEvent)
         {
@@ -329,6 +372,8 @@ namespace TAS.Server
 
         internal void RefreshPlayback(Event ev, bool start)
         {
+            lock (IncomingMediaGate.Sync) {
+
             var channel = _casparChannel;
             if (!CheckConnected(channel) || ev == null)
                 return;
@@ -349,10 +394,15 @@ namespace TAS.Server
                 channel.Load(item);
             _visible[ev.Layer] = ev;
             Logger.Trace("RefreshPlayback: restarted {0} from frame {1}", item.Clipname, item.Seek);
-        }
+        
+            } // Incoming media access barrier
+}
 
         public void Clear(VideoLayer aVideoLayer)
         {
+            lock (IncomingMediaGate.Sync) {
+
+            _directMedia.TryRemove(aVideoLayer,out _);
             var channel = _casparChannel;
             if (CheckConnected(channel))
             {
@@ -361,10 +411,15 @@ namespace TAS.Server
                 _loadedNext.TryRemove(aVideoLayer, out _);
                 Logger.Trace("Clear layer {0}", aVideoLayer);
             }
-        }
+        
+            } // Incoming media access barrier
+}
 
         public void Clear()
         {
+            lock (IncomingMediaGate.Sync) {
+
+            _directMedia.Clear();
             var channel = _casparChannel;
             if (CheckConnected(channel))
             {
@@ -377,7 +432,9 @@ namespace TAS.Server
                 VolumeChanged?.Invoke(this, new VolumeChangedEventArgs(VideoLayer.Program, 1));
                 Logger.Trace("Clear");
             }
-        }
+        
+            } // Incoming media access barrier
+}
 
         public void ClearMixer()
         {

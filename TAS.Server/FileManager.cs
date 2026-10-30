@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using jNet.RPC.Server;
 using TAS.Common.Interfaces;
@@ -103,6 +103,8 @@ namespace TAS.Server
 
         private void _queue(FileOperationBase operation)
         {
+            lock (IncomingMediaGate.Sync) {
+
             operation.ScheduledTime = DateTime.UtcNow;
             operation.OperationStatus = FileOperationStatus.Waiting;
             Logger.Info("Operation scheduled: {0}", operation);
@@ -126,7 +128,9 @@ namespace TAS.Server
                     break;
             }
             OperationAdded?.Invoke(this, new FileOperationEventArgs(operation));
-        }
+        
+            }
+}
 
     }
 

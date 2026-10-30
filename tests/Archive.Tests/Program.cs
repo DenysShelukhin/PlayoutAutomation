@@ -71,6 +71,33 @@ internal static class Program
         queue.Enqueue(failure);
         for (int i = 0; i < 100 && failure.OperationStatus != FileOperationStatus.Failed; i++) await Task.Delay(10);
         Check(failure.OperationStatus == FileOperationStatus.Failed && failure.TryCount == 0, "automatic native operation fails once; coordinator owns delayed retry");
+        var incoming=Path.Combine(root,"incoming");var managed=Path.Combine(root,"managed");Directory.CreateDirectory(incoming);Directory.CreateDirectory(managed);
+        var delivery=Path.Combine(incoming,"delivery.bin");File.WriteAllBytes(delivery,bytes);
+        bool locked=false;
+        using(var writer=new FileStream(delivery,FileMode.Open,FileAccess.Write,FileShare.ReadWrite)){
+            try{using(var f=IncomingFiles.Open(incoming,delivery)){} }catch(System.ComponentModel.Win32Exception e){locked=e.NativeErrorCode==32;}
+        }
+        Check(locked && File.Exists(delivery),"open writer blocks exclusive admission without moving input");
+        var moved=Path.Combine(managed,"owned.bin");string identity,hash;
+        using(var lease=IncomingFiles.Open(incoming,delivery)){identity=IncomingFiles.Identity(lease);hash=IncomingFiles.Hash(lease);IncomingFiles.Move(lease,moved);}
+        Check(!File.Exists(delivery)&&File.Exists(moved)&&AtomicMediaCopy.Hash(moved)==hash,"by-handle same-volume move preserves bytes without copy");
+        using(var lease=IncomingFiles.Open(managed,moved))Check(IncomingFiles.Identity(lease)==identity,"atomic move preserves NTFS file identity");
+        bool escaped=false;try{IncomingFiles.Delete(incoming,moved,identity,hash);}catch(IOException){escaped=true;}
+        Check(escaped&&File.Exists(moved),"cleanup rejects files outside configured managed root");
+        bool wrong=false;try{IncomingFiles.Delete(managed,moved,"other-identity",hash);}catch(IOException){wrong=true;}
+        Check(wrong&&File.Exists(moved),"cleanup rejects substituted file identity");
+        wrong=false;try{IncomingFiles.Delete(managed,moved,identity,"other-hash");}catch(IOException){wrong=true;}
+        Check(wrong&&File.Exists(moved),"cleanup rejects changed content");
+        IncomingFiles.Seal(managed,moved);
+        IncomingFiles.Delete(managed,moved,identity,hash);
+        Check(!File.Exists(moved),"sealed owned file removed through guarded by-handle disposition");
+        IncomingFiles.Delete(managed,moved,identity,hash);
+        Check(!File.Exists(moved),"repeated cleanup of confirmed missing file is idempotent");
+        var journal=new IncomingJob{Id=Guid.NewGuid(),Target=Guid.NewGuid(),State="Publishing",Name="lab",InputIdentity=identity,InputHash=hash,NewFile="revision.mov",Previous=new IncomingSnapshot{File="old.mov",Duration=123}};
+        using(var s=new MemoryStream()){
+            var js=new DataContractJsonSerializer(typeof(List<IncomingJob>));js.WriteObject(s,new List<IncomingJob>{journal});s.Position=0;var copy=((List<IncomingJob>)js.ReadObject(s)).Single();
+            Check(copy.Target==journal.Target&&copy.InputHash==hash&&copy.Previous.File=="old.mov"&&copy.State=="Publishing","interrupted revision journal retains GUID, ownership and previous pointer");
+        }
     }
     sealed class TestOperation : FileOperationBase
     {

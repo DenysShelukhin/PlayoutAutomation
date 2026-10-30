@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using TAS.Client.Config.Model;
@@ -168,7 +168,16 @@ namespace TAS.Client.Config
         private bool _tryContinueRundownAfterEngineRestart;
         public bool TryContinueRundownAfterEngineRestart { get => _tryContinueRundownAfterEngineRestart; set => SetField(ref _tryContinueRundownAfterEngineRestart, value); }
 
-        private bool _autoArchiveAfterIngest, _autoRestoreEnabled, _restoreEntireRundown;
+                private bool _incomingEnabled,_incomingCleanupEnabled=true;
+        private string _incomingFolder=@"D:\EWTN\Incoming",_incomingIngestProfileName="EWTN Managed Incoming",_incomingWorkFolder=@"D:\EWTN\Lab\IncomingWorkflow\Work";
+        private int _incomingQuietSeconds=30;
+        public bool IncomingEnabled {get=>_incomingEnabled;set=>SetField(ref _incomingEnabled,value);}
+        public bool IncomingCleanupEnabled {get=>_incomingCleanupEnabled;set=>SetField(ref _incomingCleanupEnabled,value);}
+        public string IncomingFolder {get=>_incomingFolder;set=>SetField(ref _incomingFolder,value);}
+        public string IncomingIngestProfileName {get=>_incomingIngestProfileName;set=>SetField(ref _incomingIngestProfileName,value);}
+        public string IncomingWorkFolder {get=>_incomingWorkFolder;set=>SetField(ref _incomingWorkFolder,value);}
+        public int IncomingQuietSeconds {get=>_incomingQuietSeconds;set {if(value<5)throw new ArgumentOutOfRangeException(nameof(IncomingQuietSeconds));SetField(ref _incomingQuietSeconds,value);}}
+private bool _autoArchiveAfterIngest, _autoRestoreEnabled, _restoreEntireRundown;
         private int _restoreHorizonHours = 72, _restoreMaxConcurrentJobs = 1;
         public bool AutoArchiveAfterIngest { get => _autoArchiveAfterIngest; set => SetField(ref _autoArchiveAfterIngest, value); }
         public bool AutoRestoreEnabled { get => _autoRestoreEnabled; set => SetField(ref _autoRestoreEnabled, value); }

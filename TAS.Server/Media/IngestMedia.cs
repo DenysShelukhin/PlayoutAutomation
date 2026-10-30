@@ -34,7 +34,7 @@ namespace TAS.Server.Media
         public void NotifyIngestStatusUpdated(ServerDirectory directory, TIngestStatus newStatus)
         {
             Debug.Assert(directory != null);
-            directory.NotifyIngestStatusUpdated(this, newStatus);
+            directory?.NotifyIngestStatusUpdated(this, newStatus);
         }
 
 

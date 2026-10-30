@@ -124,6 +124,7 @@ namespace TAS.Server.Media
 
         protected override IMedia AddMediaFromPath(string fullPath, DateTime lastUpdated)
         {
+            if(!File.Exists(fullPath))return null;
             if (!AcceptFile(fullPath))
                 return null;
             if (FindMediaFirstByFullPath(fullPath) is ServerMedia newMedia)

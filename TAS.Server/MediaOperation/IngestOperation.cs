@@ -56,6 +56,7 @@ namespace TAS.Server.MediaOperation
 
         internal MediaBase Dest { get; set; }
         internal event Action<IngestOperation> DestinationPrepared;
+        internal bool ManagedIncoming { get; set; }
 
         [DtoMember]
         public TAspectConversion AspectConversion
@@ -455,11 +456,14 @@ namespace TAS.Server.MediaOperation
                 FileUtils.CreateDirectoryIfNotExists(Path.GetDirectoryName(destMedia.FullPath));
             Dest.AudioChannelMapping = (TAudioChannelMapping)MediaConversion.AudioChannelMapingConversions[AudioChannelMappingConversion].OutputFormat;
             if (broadcast) Dest.AudioChannelMapping = TAudioChannelMapping.Stereo;
-            if (await helper.RunProcess(Params)  // FFmpeg 
+            if (await helper.RunProcess((ManagedIncoming ? " -xerror " : "") + Params)  // FFmpeg
                 && destMedia.FileExists())
             {
                 destMedia.MediaStatus = TMediaStatus.Copied;
                 destMedia.Verify(true);
+                if (ManagedIncoming && (destMedia.MediaStatus != TMediaStatus.Available ||
+                    !await helper.RunProcess(" -v error -xerror -i " + BroadcastProbe.Quote(destMedia.FullPath) + " -map 0:v:0 -map 0:a:0 -f null NUL")))
+                    return false; // owned input is retained; no completion acknowledgement
                 destMedia.TcPlay = destMedia.TcStart;
                 destMedia.DurationPlay = destMedia.Duration;
                 // Verification saves before these final playback properties are assigned.
@@ -472,6 +476,7 @@ namespace TAS.Server.MediaOperation
                     destMedia.MediaStatus = TMediaStatus.CopyError;
                     (destMedia as PersistentMedia)?.Save();
                     AddWarningMessage($"Durations are different: {localSourceMedia.Duration.ToSmpteTimecodeString(localSourceMedia.FrameRate())} vs {destMedia.Duration.ToSmpteTimecodeString(destMedia.FrameRate())}");
+                    if (ManagedIncoming) return false;
                 }
                 else
                 {

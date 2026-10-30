@@ -30,6 +30,10 @@ namespace TAS.Server
         private readonly ConcurrentBag<Action> _delegateUnregisterActions = new ConcurrentBag<Action>();
         private bool _disposed;
         private ArchiveAutomation _archiveAutomation;
+        private IncomingCoordinator _incoming;
+        private string _incomingStatus="Incoming OFF";
+        [DtoMember] public string IncomingStatus {get=>_incomingStatus;private set=>SetField(ref _incomingStatus,value);}
+        internal void SetIncomingStatus(string value)=>IncomingStatus=value;
         private string _automationStatus = "Automatic Archive / Restore disabled";
         [DtoMember] public string AutomationStatus { get => _automationStatus; private set => SetField(ref _automationStatus, value); }
         internal void SetAutomationStatus(string value) => AutomationStatus = value;
@@ -100,6 +104,7 @@ namespace TAS.Server
             };
             await Task.WhenAll(initTasks);
             InitialMediaSynchronization();
+            _incoming=new IncomingCoordinator(_engine,this,_archiveAutomation);
             Logger.Debug("End initializing");
         }
 
@@ -688,6 +693,7 @@ namespace TAS.Server
             if (_disposed)
                 return;
             _disposed = true;
+            _incoming?.Dispose();
             _archiveAutomation?.Dispose();
             foreach(var action in _delegateUnregisterActions)
                 action();

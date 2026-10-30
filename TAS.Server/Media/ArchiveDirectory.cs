@@ -24,6 +24,13 @@ namespace TAS.Server.Media
             return DatabaseProvider.Database.ArchiveContainsMedia(this, mediaGuid);
         }
 
+        internal ArchiveMedia[] FindByLogicalName(string name)
+        {
+            return System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(
+                DatabaseProvider.Database.ArchiveMediaSearch<ArchiveMedia>(this,null,name.ToLowerInvariant()),
+                m=>string.Equals(m.MediaName.Normalize(),name.Normalize(),StringComparison.OrdinalIgnoreCase)));
+        }
+
         public event EventHandler<MediaIsArchivedEventArgs> MediaIsArchived;
 
         internal void ArchiveSave(ServerMedia media, bool deleteAfterSuccess)
@@ -113,19 +120,20 @@ namespace TAS.Server.Media
 
         // Automation uses the same CopyOperation and callbacks, with durable destination identity.
         internal CopyOperation PrepareAutomationCopy(MediaBase source, MediaDirectoryBase destination,
-            string recoveryFolder = null, string recoveryName = null)
+            string recoveryFolder = null, string recoveryName = null, bool revision = false)
         {
             var operation = new CopyOperation { Source = source, DestDirectory = destination,
                 AtomicPublication = true, TryCount = 1, IsScheduledRestore = destination is ServerDirectory };
             if (destination == this)
             {
                 var known = Find(source.MediaGuid) as ArchiveMedia;
-                var target = known ?? new ArchiveMedia { MediaGuid = source.MediaGuid, Folder = recoveryFolder ?? GetCurrentFolder(),
+                var target = (revision ? null : known) ?? new ArchiveMedia { MediaGuid = source.MediaGuid, Folder = recoveryFolder ?? GetCurrentFolder(),
                     FileName = recoveryName ?? source.FileName, MediaStatus = TMediaStatus.Required };
+                if(revision && known!=null)target.IdPersistentMedia=known.IdPersistentMedia;
                 target.CloneMediaProperties(source);
                 target.Directory = this;
                 // GUID prefix prevents collisions, not additional copies for repeat requests.
-                if (known == null && recoveryName == null)
+                if ((known == null || revision) && recoveryName == null)
                     target.FileName = source.MediaGuid.ToString("N") + "_" + source.FileName;
                 operation.Dest = target;
             }

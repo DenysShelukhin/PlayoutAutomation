@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using TAS.Common;
 using TAS.Database.Common;
@@ -62,6 +62,13 @@ namespace TAS.Client.Config.Model
         [Hibernate] public bool RestoreEntireRundown { get; set; }
         [Hibernate] public int RestoreMaxConcurrentJobs { get; set; } = 1;
         [Hibernate] public string ArchiveAutomationJournal { get; set; }
+        [Hibernate] public bool IncomingEnabled { get; set; }
+        [Hibernate] public string IncomingFolder { get; set; } = @"D:\EWTN\Incoming";
+        [Hibernate] public string IncomingIngestProfileName { get; set; } = "EWTN Managed Incoming";
+        [Hibernate] public string IncomingWorkFolder { get; set; } = @"D:\EWTN\Lab\IncomingWorkflow\Work";
+        [Hibernate] public int IncomingQuietSeconds { get; set; } = 30;
+        [Hibernate] public bool IncomingCleanupEnabled { get; set; } = true;
+        [Hibernate] public string IncomingJournal { get; set; }
 
         public bool IsModified = false;
 

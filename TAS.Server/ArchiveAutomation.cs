@@ -26,6 +26,7 @@ namespace TAS.Server
         [DataMember] public long RetryUtcTicks;
         [DataMember] public string Error;
         [DataMember] public bool IngestConfirmed;
+        [DataMember] public string RevisionHash;
     }
 
     internal sealed class ArchiveAutomation : IDisposable
@@ -82,6 +83,15 @@ namespace TAS.Server
         }
 
         internal void ScheduleChanged() => Interlocked.Exchange(ref _dirty, 1);
+        internal bool HasPending(Guid id) { lock(_sync)return _archive.ContainsKey(id)||_activeArchives.ContainsKey(id)||_activeRestores.ContainsKey(id); }
+        internal void RequestCommittedRevision(ServerMedia media,string hash)
+        {
+            lock(_sync){
+                if(_archive.TryGetValue(media.MediaGuid,out var previous) && previous.RevisionHash==hash)return;
+                if(_activeArchives.ContainsKey(media.MediaGuid)||_activeRestores.ContainsKey(media.MediaGuid))throw new IOException("Archive/Restore operation still owns this material");
+                _archive[media.MediaGuid]=new ArchiveIntent{Guid=media.MediaGuid,Name=media.MediaName,Phase="Pending",IngestConfirmed=true,RevisionHash=hash};Persist();
+            }
+        }
 
         private void OperationAdded(object sender, FileOperationEventArgs args)
         {
@@ -158,7 +168,7 @@ namespace TAS.Server
             if (Interlocked.Exchange(ref _running, 1) != 0) return;
             try
             {
-                lock (_sync)
+                lock (IncomingMediaGate.Sync) lock (_sync)
                 {
                     if (_disposed) return;
                     if (!(_manager.MediaDirectoryPRI is ServerDirectory initialized) || !initialized.IsInitialized) return;
@@ -240,6 +250,8 @@ namespace TAS.Server
                     var archive = _manager.ArchiveDirectory as ArchiveDirectory;
                     if (archive == null || !archive.DirectoryExists) throw new IOException("Archive unavailable");
                     var source = archive.Find(w.Guid) as ArchiveMedia;
+                    if(_archive.TryGetValue(w.Guid,out var revision) && revision.RevisionHash!=null)
+                        throw new IOException("Latest revision archive is pending; stale Archive Restore is blocked");
                     if (!Ready(source)) throw new IOException("Material absent or invalid in Archive: " + w.Guid);
                     local.RefreshVolumeInfo();
                     if (!ArchivePreparationRules.HasSpace(source.FileSize, local.VolumeFreeSize, _activeRestores.Values.Select(o => o.Source.FileSize)))
@@ -291,7 +303,9 @@ namespace TAS.Server
                     var archive = _manager.ArchiveDirectory as ArchiveDirectory;
                     if (archive == null || !archive.DirectoryExists) throw new IOException("Archive unavailable; local copy retained");
                     var existing = archive.Find(item.Guid) as ArchiveMedia;
-                    if (Ready(existing))
+                    bool revised=item.RevisionHash!=null;
+                    if(revised && AtomicMediaCopy.Hash(source.FullPath)!=item.RevisionHash)throw new IOException("Local revision does not match committed intent");
+                    if (Ready(existing) && (!revised || AtomicMediaCopy.Hash(existing.FullPath)==item.RevisionHash))
                     {
                         if (existing.FileSize != source.FileSize || AtomicMediaCopy.Hash(existing.FullPath) != AtomicMediaCopy.Hash(source.FullPath))
                             throw new IOException("Archive GUID/content conflict; archive will not be overwritten");
@@ -309,7 +323,7 @@ namespace TAS.Server
                     archive.RefreshVolumeInfo();
                     if (!ArchivePreparationRules.HasSpace(source.FileSize, archive.VolumeFreeSize, new ulong[0]))
                         throw new IOException("Insufficient Archive free space; local copy retained");
-                    var op = archive.PrepareAutomationCopy(source, archive, item.Folder, item.File);
+                    var op = archive.PrepareAutomationCopy(source, archive, item.Folder, item.File, revised);
                     item.Folder = op.Dest.Folder; item.File = op.Dest.FileName; item.Phase = "Copying"; item.Error = null;
                     Persist(); // remember reserved target across process restarts
                     _activeArchives.Add(item.Guid, op);
@@ -331,7 +345,14 @@ namespace TAS.Server
             {
                 _activeArchives.Remove(item.Guid);
                 if (_disposed) return;
-                if (op.OperationStatus == FileOperationStatus.Finished && Ready(archive.Find(item.Guid) as ArchiveMedia))
+                bool confirmed=false;
+                try{
+                    var registered=archive.Find(item.Guid) as ArchiveMedia;
+                    confirmed=op.OperationStatus==FileOperationStatus.Finished && Ready(registered) &&
+                        (item.RevisionHash==null || (string.Equals(registered.FullPath,op.Dest.FullPath,StringComparison.OrdinalIgnoreCase) &&
+                        registered.FileSize==op.Dest.FileSize && AtomicMediaCopy.Hash(registered.FullPath)==item.RevisionHash));
+                }catch(Exception e){Log.Error(e,"Archive revision registration readback failed; retry retained");}
+                if (confirmed)
                 { _archive.Remove(item.Guid); _history[item.Guid] = "Archive Ready: " + item.Name; }
                 else
                 { item.Phase = "Failed"; item.Error = "Native archive copy not confirmed/registered Ready"; item.RetryUtcTicks = Retry(++item.Attempts).Ticks; }

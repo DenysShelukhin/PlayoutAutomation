@@ -49,7 +49,7 @@
     </UserControl.InputBindings>
     <DockPanel>
       <Expander DockPanel.Dock="Top" Header="Automatic Archive / Restore — readiness and warnings" IsExpanded="True">
-        <ScrollViewer MaxHeight="130" VerticalScrollBarVisibility="Auto"><TextBlock AutomationProperties.AutomationId="ArchiveAutomationStatus" Text="{Binding MediaManager.AutomationStatus}" TextWrapping="Wrap" Margin="5"/></ScrollViewer>
+        <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock AutomationProperties.AutomationId="IncomingStatus" Text="{Binding MediaManager.IncomingStatus}" TextWrapping="Wrap" Margin="5"/><TextBlock AutomationProperties.AutomationId="ArchiveAutomationStatus" Text="{Binding MediaManager.AutomationStatus}" TextWrapping="Wrap" Margin="5"/></StackPanel></ScrollViewer>
       </Expander>
     <Grid>
         <Grid.RowDefinitions>

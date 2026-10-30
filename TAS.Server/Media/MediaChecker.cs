@@ -76,7 +76,7 @@ namespace TAS.Server.Media
                             && Math.Abs(videoDuration.Ticks - audioDuration.Ticks) >= TimeSpan.TicksPerSecond)
                             // when more than 1 sec difference
                             media.MediaStatus = TMediaStatus.ValidationError;
-                        media.MediaStatus = TMediaStatus.Available;
+                        else media.MediaStatus = TMediaStatus.Available;
                     }
                     else
                         media.MediaStatus = TMediaStatus.ValidationError;

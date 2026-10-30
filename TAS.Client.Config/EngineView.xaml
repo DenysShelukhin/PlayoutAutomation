@@ -28,6 +28,12 @@
             <Label Content="Aspect ratio control"/>
             <Expander Header="Automatic Archive / schedule preparation" Margin="5">
                 <StackPanel>
+                    <CheckBox Content="Automatic Incoming (ordinary Explorer/SMB delivery)" AutomationProperties.AutomationId="IncomingEnabled" IsChecked="{Binding IncomingEnabled}"/>
+                    <Label Content="Incoming folder"/><TextBox AutomationProperties.AutomationId="IncomingFolder" Text="{Binding IncomingFolder,UpdateSourceTrigger=PropertyChanged}"/>
+                    <Label Content="Managed Ingest profile"/><TextBox AutomationProperties.AutomationId="IncomingIngestProfileName" Text="{Binding IncomingIngestProfileName,UpdateSourceTrigger=PropertyChanged}"/>
+                    <Label Content="Private candidate folder (same volume as media)"/><TextBox AutomationProperties.AutomationId="IncomingWorkFolder" Text="{Binding IncomingWorkFolder,UpdateSourceTrigger=PropertyChanged}"/>
+                    <Label Content="Incoming quiet seconds (minimum 5)"/><TextBox AutomationProperties.AutomationId="IncomingQuietSeconds" Text="{Binding IncomingQuietSeconds,UpdateSourceTrigger=PropertyChanged,ValidatesOnExceptions=True}"/>
+                    <CheckBox Content="Clean only managed inputs after committed Ingest" AutomationProperties.AutomationId="IncomingCleanupEnabled" IsChecked="{Binding IncomingCleanupEnabled}"/>
                     <CheckBox Content="Copy completed Ingest to Archive (keep local and Incoming)" AutomationProperties.AutomationId="AutoArchiveAfterIngest" IsChecked="{Binding AutoArchiveAfterIngest}"/>
                     <CheckBox Content="Restore missing scheduled media automatically" AutomationProperties.AutomationId="AutoRestoreEnabled" IsChecked="{Binding AutoRestoreEnabled}"/>
                     <Label Content="Restore horizon (positive hours; default 72)"/>
