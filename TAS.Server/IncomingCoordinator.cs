@@ -233,7 +233,8 @@ namespace TAS.Server
                 j.State="Publishing";Persist();
             }
             var newPath=IncomingFiles.Within(Local.Folder,Path.Combine(Local.Folder,j.NewFile));
-            if(File.Exists(candidatePath) && AtomicMediaCopy.Hash(candidatePath)!=j.CandidateHash)throw new IOException("Prepared revision hash mismatch");
+            var preparedPath=File.Exists(candidatePath)?candidatePath:newPath;
+            if(!File.Exists(preparedPath) || AtomicMediaCopy.Hash(preparedPath)!=j.CandidateHash)throw new IOException("Prepared/recovered revision hash mismatch; input and previous version retained");
             lock(IncomingMediaGate.Sync){
                 if(Busy(j.Target) || _archive.HasPending(j.Target)){j.Error="Waiting for material to become idle";return;}
                 var staged=new IncomingWorkMedia{Directory=new IncomingWorkDirectory{Folder=File.Exists(candidatePath)?_engine.IncomingWorkFolder:Local.Folder},FileName=File.Exists(candidatePath)?j.Candidate:j.NewFile,MediaType=TMediaType.Movie,MediaStatus=TMediaStatus.Copied};
@@ -247,8 +248,8 @@ namespace TAS.Server
                 IncomingPersistence.Save(target,Local); // durable GUID/path before watcher sees final filename
                 if(!File.Exists(newPath)){using(var f=IncomingFiles.Open(_engine.IncomingWorkFolder,candidatePath)){j.NewIdentity=IncomingFiles.Identity(f);IncomingFiles.Move(f,newPath);}}
                 target.MediaStatus=TMediaStatus.Copied;target.Verify(true);if(target.MediaStatus!=TMediaStatus.Available)throw new IOException("Published revision failed native verification");
+                using(var f=IncomingFiles.Inspect(Local.Folder,newPath)){if((j.NewIdentity!=null && IncomingFiles.Identity(f)!=j.NewIdentity) || IncomingFiles.Hash(f)!=j.CandidateHash)throw new IOException("Published identity/content changed; cleanup prohibited");j.NewIdentity=IncomingFiles.Identity(f);}
                 target.TcPlay=target.TcStart;target.DurationPlay=target.Duration;IncomingPersistence.Save(target,Local);confirmed=true;
-                using(var f=IncomingFiles.Inspect(Local.Folder,newPath)){if(j.NewIdentity!=null && IncomingFiles.Identity(f)!=j.NewIdentity)throw new IOException("Published identity changed");j.NewIdentity=IncomingFiles.Identity(f);}
                 _archive.RequestCommittedRevision(target,j.CandidateHash);
                 j.State="Committed";j.Error=null;Persist();_engine.NotifyMediaVerified(new MediaEventArgs(target));
                 }catch{
@@ -256,6 +257,7 @@ namespace TAS.Server
                     // A confirmed SQL publication is monotonic. Retry archive/journal acknowledgement;
                     // never roll it back after archive revision intent may already be durable.
                     if(!confirmed){
+                        target.MediaStatus=TMediaStatus.Copying; // never expose an unconfirmed/corrupt revision as Ready
                         // Park our immutable version before restoring the previous pointer, so the
                         // directory watcher cannot register an orphan under a different GUID.
                         if(File.Exists(newPath) && !File.Exists(candidatePath)){
