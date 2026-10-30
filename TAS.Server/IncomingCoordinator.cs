@@ -154,9 +154,17 @@ namespace TAS.Server
             Server.FileManager.Current.Queue(op);
         }
         private static string Key(string s)=>(s??"").Normalize(NormalizationForm.FormC).ToUpperInvariant();
+        internal static bool MatchesName(string name,string mediaName,string fileName,Guid guid)
+        {
+            if(Key(name)==Key(mediaName))return true;
+            var physical=Path.GetFileNameWithoutExtension(fileName??"");
+            if(physical.StartsWith(guid.ToString("N")+"_",StringComparison.OrdinalIgnoreCase))physical=physical.Substring(33);
+            return Key(name)==Key(physical);
+        }
         private ServerMedia Resolve(IncomingJob j)
         {
-            var matches=Local.GetAllFiles().OfType<ServerMedia>().Where(m=>Key(m.MediaName)==Key(j.Name)).ToArray();
+            var known=_jobs.Where(x=>x!=j && x.Target!=Guid.Empty && x.State=="Done" && Key(x.Name)==Key(j.Name)).OrderByDescending(x=>x.Created).FirstOrDefault();
+            var matches=Local.GetAllFiles().OfType<ServerMedia>().Where(m=>MatchesName(j.Name,m.MediaName,m.FileName,m.MediaGuid) || (known!=null && m.MediaGuid==known.Target)).ToArray();
             if(matches.Length>1)throw new IOException("Ambiguous logical name; existing materials retained");
             if(matches.Length==1)return matches[0];
             var archived=((ArchiveDirectory)_manager.ArchiveDirectory).FindByLogicalName(j.Name);

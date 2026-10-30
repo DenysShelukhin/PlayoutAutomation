@@ -27,7 +27,10 @@ Native Ingest writes outside the watched Server Media directory, runs with -xerr
 verifies metadata/duration and fully decodes the output. A durable revision intent
 then publishes the immutable version under its existing MediaGuid. Logical identity
 is the extensionless filename, NFC-normalized and case-insensitive, matched against
-MediaName. Ambiguous names are held; no arbitrary existing material is chosen.
+MediaName, legacy physical filenames and retained completed Incoming identities.
+Native archive GUID prefixes are stripped for legacy filename matching. Ambiguous
+names are held; no arbitrary existing material is chosen. Keep the logical title stable
+for old Incoming items after their bounded successful-job history is pruned.
 
 Program, preload, Preview, disconnected channels and queued native media operations
 defer replacement. A read-only AMCP check additionally detects producers surviving

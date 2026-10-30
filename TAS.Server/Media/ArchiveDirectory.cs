@@ -28,7 +28,7 @@ namespace TAS.Server.Media
         {
             return System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(
                 DatabaseProvider.Database.ArchiveMediaSearch<ArchiveMedia>(this,null,name.ToLowerInvariant()),
-                m=>string.Equals(m.MediaName.Normalize(),name.Normalize(),StringComparison.OrdinalIgnoreCase)));
+                m=>IncomingCoordinator.MatchesName(name,m.MediaName,m.FileName,m.MediaGuid)));
         }
 
         public event EventHandler<MediaIsArchivedEventArgs> MediaIsArchived;

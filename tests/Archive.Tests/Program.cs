@@ -93,6 +93,9 @@ internal static class Program
         Check(!File.Exists(moved),"sealed owned file removed through guarded by-handle disposition");
         IncomingFiles.Delete(managed,moved,identity,hash);
         Check(!File.Exists(moved),"repeated cleanup of confirmed missing file is idempotent");
+        Check(IncomingCoordinator.MatchesName("PROGRAM","Edited title","Program.mov",guid),"legacy physical filename retains replacement identity after title editing");
+        Check(IncomingCoordinator.MatchesName("program","Edited title",guid.ToString("N")+"_Program.mov",guid),"native archive GUID prefix does not hide legacy logical filename");
+        Check(!IncomingCoordinator.MatchesName("other","Program","Program.mov",guid),"different filename is not treated as replacement");
         var journal=new IncomingJob{Id=Guid.NewGuid(),Target=Guid.NewGuid(),State="Publishing",Name="lab",InputIdentity=identity,InputHash=hash,NewFile="revision.mov",Previous=new IncomingSnapshot{File="old.mov",Duration=123}};
         using(var s=new MemoryStream()){
             var js=new DataContractJsonSerializer(typeof(List<IncomingJob>));js.WriteObject(s,new List<IncomingJob>{journal});s.Position=0;var copy=((List<IncomingJob>)js.ReadObject(s)).Single();
