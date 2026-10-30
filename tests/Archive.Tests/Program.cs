@@ -29,13 +29,18 @@ internal static class Program
         Check(!ArchivePreparationRules.HasSpace(ulong.MaxValue, long.MaxValue, new ulong[0]), "overflow fails closed");
         Check((ArchivePreparationRules.NextRetry(now, 1) - now).TotalSeconds == 30, "first retry delayed30s");
         Check((ArchivePreparationRules.NextRetry(now, 100) - now).TotalSeconds == 600, "backoff bounded10minutes");
-        var intent = new ArchiveIntent { Guid = Guid.NewGuid(), Name = "lab", Phase = "Copying", Folder = "202610", File = "reserved.mov", Attempts = 2, RetryUtcTicks = now.AddMinutes(1).Ticks };
+        var intent = new ArchiveIntent { Guid = Guid.NewGuid(), Name = "lab", Phase = "Copying", Folder = "202610", File = "reserved.mov", Attempts = 2, RetryUtcTicks = now.AddMinutes(1).Ticks, IngestConfirmed = true };
         var serializer = new DataContractJsonSerializer(typeof(List<ArchiveIntent>));
         using (var stream = new MemoryStream())
         {
             serializer.WriteObject(stream, new List<ArchiveIntent> { intent }); stream.Position = 0;
             var recovered = ((List<ArchiveIntent>)serializer.ReadObject(stream)).Single();
-            Check(recovered.Guid == intent.Guid && recovered.File == intent.File && recovered.RetryUtcTicks == intent.RetryUtcTicks, "durable reserved destination/retry identity roundtrip");
+            Check(recovered.Guid == intent.Guid && recovered.File == intent.File && recovered.RetryUtcTicks == intent.RetryUtcTicks && recovered.IngestConfirmed, "durable destination/retry and native completion acknowledgement roundtrip");
+        }
+        using (var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("[{\"Guid\":\"" + Guid.NewGuid() + "\",\"Phase\":\"Failed\"}]")))
+        {
+            var unconfirmed = ((List<ArchiveIntent>)serializer.ReadObject(stream)).Single();
+            Check(!unconfirmed.IngestConfirmed, "interrupted intent without native success acknowledgement recovers unconfirmed even in Failed phase");
         }
         Directory.CreateDirectory(root);
         var source = Path.Combine(root, "source.bin"); var dest = Path.Combine(root, "result.bin");

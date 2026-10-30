@@ -27,7 +27,10 @@ Archived results remain selectable when the local cache is absent.
 
 Before native Ingest writes its result, its GUID intent is stored in the existing
 engine Config JSON. Successful Ingest makes that intent eligible for native Copy
-to Archive. Failed Ingest never archives a partial output. GUID-prefix archive
+to Archive. Its native Success acknowledgement is durable and separate from
+retry phase: a decodable but shortened interrupted output is never inferred to
+be completed. Unconfirmed results require operator review; an explicitly made,
+verified matching native Archive copy can retire their intent. GUID-prefix archive
 filenames and a durable reserved destination prevent duplicate copies after a
 restart; logical name, GUID, timecodes and other native media properties persist.
 Existing GUID/content conflicts fail without overwrite. Journal write failures
@@ -85,7 +88,7 @@ do it automatically. Keep archive and source files intact.
 
 ## Checks
 
-`tests/Archive.Tests` uses a caller-provided disposable directory: 22 checks for
+`tests/Archive.Tests` uses a caller-provided disposable directory: 23 checks for
 horizon boundaries, whole-rundown mode, reservations/overflow, retry backoff,
 journal serialization, actual atomic SHA copy, no-overwrite/idempotency,
 cancellation cleanup and actual bounded concurrent native operations.

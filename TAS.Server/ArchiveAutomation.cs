@@ -25,6 +25,7 @@ namespace TAS.Server
         [DataMember] public int Attempts;
         [DataMember] public long RetryUtcTicks;
         [DataMember] public string Error;
+        [DataMember] public bool IngestConfirmed;
     }
 
     internal sealed class ArchiveAutomation : IDisposable
@@ -112,6 +113,7 @@ namespace TAS.Server
                 if (_disposed || op.Dest == null) return;
                 if (_archive.TryGetValue(op.Dest.MediaGuid, out var item))
                 {
+                    item.IngestConfirmed = true;
                     item.Phase = "Pending"; item.Error = null; item.RetryUtcTicks = 0;
                     TryPersist();
                 }
@@ -295,6 +297,12 @@ namespace TAS.Server
                             throw new IOException("Archive GUID/content conflict; archive will not be overwritten");
                         _archive.Remove(item.Guid); _history[item.Guid] = "Archive Ready: " + item.Name; Persist(); continue;
                     }
+                    // A decodable MOV can still be a shortened cancelled Ingest.
+                    // Only durable native Success permits a new automatic copy.
+                    // A matching copy explicitly made by the operator can retire
+                    // this intent through the verified-existing branch above.
+                    if (!item.IngestConfirmed)
+                        throw new IOException("Ingest completion was not durably confirmed; no output automatically archived. Operator review required.");
                     if (OtherCopy(item.Guid, archive)) continue;
                     // One native simple-copy lane; retain other intents as Pending, not a large duplicate queue.
                     if (_activeArchives.Count != 0) continue;
