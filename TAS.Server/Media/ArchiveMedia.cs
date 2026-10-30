@@ -22,7 +22,7 @@ namespace TAS.Server.Media
 
         public TIngestStatus GetIngestStatus(IServerDirectory directory)
         {
-            if (!(Directory is ServerDirectory sdir))
+            if (!(directory is ServerDirectory sdir))
                 return TIngestStatus.Unknown;
             var media = sdir.FindMediaByMediaGuid(MediaGuid);
             if (media != null && media.MediaStatus == TMediaStatus.Available)
@@ -32,7 +32,7 @@ namespace TAS.Server.Media
 
         public void NotifyIngestStatus(IServerDirectory directory, TIngestStatus newStatus)
         {
-
+            (directory as ServerDirectory)?.NotifyIngestStatusUpdated(this, newStatus);
         }
 
         public override void Save()

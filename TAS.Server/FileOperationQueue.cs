@@ -13,7 +13,8 @@ namespace TAS.Server
     {
         private readonly Queue<FileOperationBase> _queue = new Queue<FileOperationBase>();
         
-        private FileOperationBase _currentOperation;
+        private readonly HashSet<FileOperationBase> _currentOperations = new HashSet<FileOperationBase>();
+        internal int MaxConcurrent { get; set; } = 1;
 
         public void Enqueue(FileOperationBase operation)
         {
@@ -29,8 +30,7 @@ namespace TAS.Server
             lock (((ICollection)_queue).SyncRoot)
             {
                 var result = _queue.ToList();
-                if (_currentOperation != null)
-                    result.Add(_currentOperation);
+                result.AddRange(_currentOperations);
                 return result;
             }
         }
@@ -50,19 +50,19 @@ namespace TAS.Server
                 FileOperationBase operation;
                 lock (((ICollection)_queue).SyncRoot)
                 {
-                    if (_currentOperation != null)
+                    if (_currentOperations.Count >= MaxConcurrent)
                         return;
                     if (_queue.Count == 0)
                         return;
                     operation = _queue.Dequeue();
                     if (operation.IsAborted)
                         continue;
-                    _currentOperation = operation;
+                    _currentOperations.Add(operation);
                 }
                 var success = await operation.Execute();
                 lock (((ICollection)_queue).SyncRoot)
                 {
-                    _currentOperation = null;
+                    _currentOperations.Remove(operation);
                     if (!operation.IsAborted)
                         if (!success)
                         {

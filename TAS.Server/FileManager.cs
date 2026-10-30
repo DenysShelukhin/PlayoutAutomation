@@ -18,6 +18,8 @@ namespace TAS.Server
         private readonly FileOperationQueue _queueSimpleOperation = new FileOperationQueue();
         private readonly FileOperationQueue _queueConvertOperation = new FileOperationQueue();
         private readonly FileOperationQueue _queueExportOperation = new FileOperationQueue();
+        private readonly FileOperationQueue _queueRestoreOperation = new FileOperationQueue();
+        internal int RestoreMaxConcurrentJobs { set => _queueRestoreOperation.MaxConcurrent = value; }
 
         public static FileManager Current { get; } = new FileManager();
 
@@ -26,6 +28,7 @@ namespace TAS.Server
             _queueSimpleOperation.OperationCompleted += _queue_OperationCompleted;
             _queueConvertOperation.OperationCompleted += _queue_OperationCompleted;
             _queueExportOperation.OperationCompleted += _queue_OperationCompleted;
+            _queueRestoreOperation.OperationCompleted += _queue_OperationCompleted;
         }
 
         internal void Shutdown()
@@ -33,6 +36,7 @@ namespace TAS.Server
             _queueSimpleOperation.OperationCompleted -= _queue_OperationCompleted;
             _queueConvertOperation.OperationCompleted -= _queue_OperationCompleted;
             _queueExportOperation.OperationCompleted -= _queue_OperationCompleted;
+            _queueRestoreOperation.OperationCompleted -= _queue_OperationCompleted;
         }
 
         private void _queue_OperationCompleted(object sender, FileOperationEventArgs e)
@@ -41,6 +45,7 @@ namespace TAS.Server
         }
 
         public event EventHandler<FileOperationEventArgs> OperationAdded;
+        internal event EventHandler<FileOperationEventArgs> OperationPreparing;
         public event EventHandler<FileOperationEventArgs> OperationCompleted;
 
 
@@ -70,6 +75,7 @@ namespace TAS.Server
             var retList = _queueSimpleOperation.GetQueue();
             retList.AddRange(_queueConvertOperation.GetQueue());
             retList.AddRange(_queueExportOperation.GetQueue());
+            retList.AddRange(_queueRestoreOperation.GetQueue());
             return retList.ToArray();
         }
 
@@ -91,6 +97,7 @@ namespace TAS.Server
             _queueSimpleOperation.CancelPending();
             _queueConvertOperation.CancelPending();
             _queueExportOperation.CancelPending();
+            _queueRestoreOperation.CancelPending();
             Logger.Trace("Cancelled pending operations");
         }
 
@@ -99,8 +106,12 @@ namespace TAS.Server
             operation.ScheduledTime = DateTime.UtcNow;
             operation.OperationStatus = FileOperationStatus.Waiting;
             Logger.Info("Operation scheduled: {0}", operation);
+            OperationPreparing?.Invoke(this, new FileOperationEventArgs(operation));
             switch (operation)
             {
+                case CopyOperation copy when copy.IsScheduledRestore:
+                    _queueRestoreOperation.Enqueue(copy);
+                    break;
                 case IngestOperation _:
                     _queueConvertOperation.Enqueue(operation);
                     break;

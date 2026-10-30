@@ -140,6 +140,14 @@ namespace TAS.Server
         [Hibernate]
         public bool TryContinueRundownAfterEngineRestart { get; set; }
 
+        // Opt-in defaults preserve existing installations; the journal uses existing Config JSON.
+        [Hibernate] public bool AutoArchiveAfterIngest { get; set; }
+        [Hibernate] public bool AutoRestoreEnabled { get; set; }
+        [Hibernate] public int RestoreHorizonHours { get; set; } = 72;
+        [Hibernate] public bool RestoreEntireRundown { get; set; }
+        [Hibernate] public int RestoreMaxConcurrentJobs { get; set; } = 1;
+        [Hibernate] public string ArchiveAutomationJournal { get; set; }
+
         #endregion //IEngineProperties
 
         public TArchivePolicyType ArchivePolicy { get; set; } = TArchivePolicyType.NoArchive;
@@ -826,6 +834,7 @@ namespace TAS.Server
 
         internal void NotifyEventDeleted(Event @event)
         {
+            _mediaManager.ScheduleChanged();
             EventDeleted?.Invoke(this, new EventEventArgs(@event));
         }
 

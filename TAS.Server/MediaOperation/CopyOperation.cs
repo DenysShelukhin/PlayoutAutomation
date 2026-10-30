@@ -23,6 +23,8 @@ namespace TAS.Server.MediaOperation
         public IMedia Source { get => _sourceMedia; set => SetField(ref _sourceMedia, value); }
 
         internal MediaBase Dest { get; set; }
+        internal bool AtomicPublication { get; set; }
+        internal bool IsScheduledRestore { get; set; }
 
         // utility methods
 
@@ -34,7 +36,10 @@ namespace TAS.Server.MediaOperation
                     return;
                 if (!(DestDirectory is MediaDirectoryBase mediaDirectory))
                     throw new ApplicationException($"Cannot create destination media on {DestDirectory}");
-                Dest = (MediaBase) mediaDirectory.CreateMedia(Source);
+                // Reuse a missing placeholder, preserving GUID and event references.
+                Dest = Source is ArchiveMedia && mediaDirectory is ServerDirectory server
+                    ? server.FindMediaByMediaGuid(Source.MediaGuid) : null;
+                if (Dest == null) Dest = (MediaBase)mediaDirectory.CreateMedia(Source);
             }
         }
 
@@ -51,10 +56,10 @@ namespace TAS.Server.MediaOperation
                     newIngestStatus = TIngestStatus.InProgress;
                     break;
                 default:
-                    newIngestStatus = TIngestStatus.Unknown;
+                    newIngestStatus = TIngestStatus.NotReady;
                     break;
             }
-            if (_sourceMedia is MediaBase mediaBase && mediaBase.Directory is ServerDirectory serverDirectory)
+            if (DestDirectory is ServerDirectory serverDirectory)
             {
                 if (_sourceMedia is IngestMedia im)
                     im.NotifyIngestStatusUpdated(serverDirectory, newIngestStatus);
@@ -66,6 +71,7 @@ namespace TAS.Server.MediaOperation
         public override void Abort()
         {
             base.Abort();
+            if (AtomicPublication) return; // never delete a published complete file on cancellation
             lock (_destMediaLock)
             {
                 if (Dest != null && Dest.FileExists())
@@ -82,6 +88,31 @@ namespace TAS.Server.MediaOperation
                 return false;
             CreateDestMediaIfNotExists();
             FileUtils.CreateDirectoryIfNotExists(Path.GetDirectoryName(Dest.FullPath));
+            if (AtomicPublication)
+            {
+                Dest.IsVerified = false;
+                Dest.MediaStatus = TMediaStatus.Copying;
+                if (Dest is ServerMedia placeholder)
+                {
+                    placeholder.Save(); // durable GUID before publishing any playable filename
+                    if (placeholder.IdPersistentMedia == 0) throw new IOException("Cannot persist restore placeholder.");
+                }
+                await AtomicMediaCopy.Copy(source.FullPath, Dest.FullPath, source.MediaGuid,
+                    CancellationTokenSource.Token, p => Progress = p).ConfigureAwait(false);
+                // Once atomically published, retain and verify the complete cache even if
+                // the requesting event was removed at the publication boundary.
+                Dest.MediaStatus = TMediaStatus.Copied;
+                await Task.Run(() => Dest.Verify(false)).ConfigureAwait(false);
+                if (Dest.MediaStatus != TMediaStatus.Available || !Dest.FileExists() ||
+                    (ulong)new FileInfo(Dest.FullPath).Length != Source.FileSize)
+                    throw new IOException("Copied media is not verified Ready; local/archived sources retained.");
+                (Dest as PersistentMedia)?.Save();
+                if (Dest is ArchiveMedia && DestDirectory is ArchiveDirectory archive &&
+                    (!(archive.Find(Dest.MediaGuid) is ArchiveMedia stored) || stored.FullPath != Dest.FullPath || stored.MediaStatus != TMediaStatus.Available))
+                    throw new IOException("Archive file copied but database registration not confirmed; local copy retained.");
+                ((MediaDirectoryBase)DestDirectory).RefreshVolumeInfo();
+                return true;
+            }
             if (!(Dest.FileExists()
                   && File.GetLastWriteTimeUtc(source.FullPath)
                       .Equals(File.GetLastWriteTimeUtc(Dest.FullPath))

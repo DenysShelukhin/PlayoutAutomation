@@ -25,6 +25,7 @@ namespace TAS.Client.ViewModels
     {
         private const int MinSearchLength = 3;
         private readonly IMediaManager _mediaManager;
+        public IMediaManager MediaManager => _mediaManager;
         bool _isDisplayPreview;
         private readonly PreviewViewmodel _preview;
         private MediaViewViewmodel _selectedMediaVm;

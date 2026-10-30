@@ -426,6 +426,9 @@
                     <controls:TimecodeTextBlock Timecode="{Binding SelectedTime}" VideoFormat="{Binding VideoFormat}" VerticalAlignment="Center" />
                 </StackPanel>
             </StatusBarItem>
+            <StatusBarItem>
+                <TextBlock AutomationProperties.AutomationId="ArchiveAutomationWarning" Text="{Binding Engine.MediaManager.AutomationWarning}" ToolTip="{Binding Engine.MediaManager.AutomationStatus}" Foreground="DarkOrange" MaxWidth="650" TextTrimming="CharacterEllipsis"/>
+            </StatusBarItem>
         </StatusBar>
         <DockPanel Grid.Row="1" >
             <!--<TabControl TabStripPlacement="Left" BorderThickness="0" >

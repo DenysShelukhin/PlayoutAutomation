@@ -70,6 +70,8 @@
                     <RowDefinition />
                 </Grid.RowDefinitions>
                 <UniformGrid Columns="2">
+                    <TextBlock Text="{Binding ArchiveSearchError}" Foreground="DarkOrange" TextWrapping="Wrap"/>
+                    <CheckBox Margin="5" Content="Include Archive" AutomationProperties.AutomationId="IncludeArchive" IsChecked="{Binding IncludeArchive}" Visibility="{Binding IsMovie, Converter={StaticResource BoolToVis}}" ToolTip="Find archived materials for scheduling. Restoration follows the configured schedule preparation policy."/>
                     <CheckBox Margin="5" IsChecked="{Binding ShowExpired}" Content="{Resx _showExpired}"/>
                     <CheckBox Margin="5" IsChecked="{Binding Engine.EnableCGElementsForNewEvents}" Content="{Resx _enableCGForNewEvents}" Visibility="{Binding CanEnableCGElements, Converter={StaticResource BoolToVis}}"/>
                     <CheckBox Margin="5" IsChecked="{Binding Engine.StudioMode}" Visibility="{Binding IsMovie, Converter={StaticResource BoolToVis}}" Content="{Resx _studioMode}" />

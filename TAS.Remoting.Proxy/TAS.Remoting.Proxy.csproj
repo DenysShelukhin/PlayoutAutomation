@@ -1,5 +1,6 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <FileVersion>1.8.9390.3</FileVersion><InformationalVersion>1.8.9390-ewtn.3</InformationalVersion>
     <OutputType>Library</OutputType>
     <RootNamespace>TAS.Remoting</RootNamespace>
     <AssemblyTitle>DTO proxy classes</AssemblyTitle>

@@ -55,6 +55,7 @@ namespace TAS.Server.MediaOperation
         public IMediaDirectory DestDirectory { get => _destDirectory; set => SetField(ref _destDirectory, value); }
 
         internal MediaBase Dest { get; set; }
+        internal event Action<IngestOperation> DestinationPrepared;
 
         [DtoMember]
         public TAspectConversion AspectConversion
@@ -192,6 +193,7 @@ namespace TAS.Server.MediaOperation
                 if (!(DestDirectory is MediaDirectoryBase mediaDirectory))
                     throw new ApplicationException($"Cannot create destination media on {DestDirectory}");
                 Dest = (MediaBase)mediaDirectory.CreateMedia(DestProperties ?? Source);
+                DestinationPrepared?.Invoke(this);
             }
         }
 

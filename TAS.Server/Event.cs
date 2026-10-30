@@ -1058,6 +1058,7 @@ namespace TAS.Server
                 else
                     DatabaseProvider.Database.UpdateEvent(this);
                 IsModified = false;
+                ((MediaManager)_engine.MediaManager).ScheduleChanged();
             }
             catch (Exception e)
             {

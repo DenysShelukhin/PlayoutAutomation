@@ -14,7 +14,9 @@ namespace TAS.Server.Media
 
         public IArchiveMedia Find(Guid mediaGuid)
         {
-            return DatabaseProvider.Database.ArchiveMediaFind<ArchiveMedia>(this, mediaGuid);
+            var media = DatabaseProvider.Database.ArchiveMediaFind<ArchiveMedia>(this, mediaGuid);
+            if (media != null) media.Directory = this;
+            return media;
         }
 
         public bool ContainsMedia(Guid mediaGuid)
@@ -72,10 +74,12 @@ namespace TAS.Server.Media
         internal override IMedia CreateMedia(IMediaProperties media)
         {
             var newFileName = media.FileName;
-            if (File.Exists(Path.Combine(Folder, newFileName)))
+            var currentFolder = GetCurrentFolder();
+            var destinationFolder = Path.Combine(Folder, currentFolder);
+            if (File.Exists(Path.Combine(destinationFolder, newFileName)))
             {
                 Logger.Trace("{0}: File {1} already exists", nameof(CreateMedia), newFileName);
-                newFileName = FileUtils.GetUniqueFileName(Folder, newFileName);
+                newFileName = FileUtils.GetUniqueFileName(destinationFolder, newFileName);
             }
             var result = new ArchiveMedia
             {
@@ -83,7 +87,7 @@ namespace TAS.Server.Media
                 MediaGuid = media.MediaGuid,
                 LastUpdated = media.LastUpdated,
                 MediaType = media.MediaType,
-                Folder = GetCurrentFolder(),
+                Folder = currentFolder,
                 FileName = newFileName,
                 MediaStatus = TMediaStatus.Required,
             };
@@ -101,9 +105,40 @@ namespace TAS.Server.Media
         {
             var operation = deleteAfterSuccess
                 ? (FileOperationBase) new MoveOperation {Source = fromMedia, DestDirectory = destDirectory}
-                : new CopyOperation {Source = fromMedia, DestDirectory = destDirectory};
+                : new CopyOperation {Source = fromMedia, DestDirectory = destDirectory, AtomicPublication = true};
             operation.Success += _archiveCopy_success;
             operation.Failure += _archiveCopy_failure;
+            FileManager.Current.Queue(operation);
+        }
+
+        // Automation uses the same CopyOperation and callbacks, with durable destination identity.
+        internal CopyOperation PrepareAutomationCopy(MediaBase source, MediaDirectoryBase destination,
+            string recoveryFolder = null, string recoveryName = null)
+        {
+            var operation = new CopyOperation { Source = source, DestDirectory = destination,
+                AtomicPublication = true, TryCount = 1, IsScheduledRestore = destination is ServerDirectory };
+            if (destination == this)
+            {
+                var known = Find(source.MediaGuid) as ArchiveMedia;
+                var target = known ?? new ArchiveMedia { MediaGuid = source.MediaGuid, Folder = recoveryFolder ?? GetCurrentFolder(),
+                    FileName = recoveryName ?? source.FileName, MediaStatus = TMediaStatus.Required };
+                target.CloneMediaProperties(source);
+                target.Directory = this;
+                // GUID prefix prevents collisions, not additional copies for repeat requests.
+                if (known == null && recoveryName == null)
+                    target.FileName = source.MediaGuid.ToString("N") + "_" + source.FileName;
+                operation.Dest = target;
+            }
+            operation.Success += _archiveCopy_success;
+            operation.Failure += _archiveCopy_failure;
+            return operation;
+        }
+
+        internal void QueueAutomationCopy(CopyOperation operation)
+        {
+            if (!((operation.Source is ServerMedia && operation.DestDirectory == this) ||
+                  (operation.Source is ArchiveMedia && operation.Source.Directory == this && operation.DestDirectory is ServerDirectory)))
+                throw new ArgumentException("Invalid native archive transfer.");
             FileManager.Current.Queue(operation);
         }
 

@@ -29,6 +29,14 @@ namespace TAS.Server
         private int _isInitialMediaSecToPriSynchronized;
         private readonly ConcurrentBag<Action> _delegateUnregisterActions = new ConcurrentBag<Action>();
         private bool _disposed;
+        private ArchiveAutomation _archiveAutomation;
+        private string _automationStatus = "Automatic Archive / Restore disabled";
+        [DtoMember] public string AutomationStatus { get => _automationStatus; private set => SetField(ref _automationStatus, value); }
+        internal void SetAutomationStatus(string value) => AutomationStatus = value;
+        private string _automationWarning;
+        [DtoMember] public string AutomationWarning { get => _automationWarning; private set => SetField(ref _automationWarning, value); }
+        internal void SetAutomationWarning(string value) => AutomationWarning = value;
+        internal void ScheduleChanged() => _archiveAutomation?.ScheduleChanged();
 
         public MediaManager(Engine engine)
         {
@@ -81,6 +89,7 @@ namespace TAS.Server
                 MediaDirectoryPRV = ((CasparServerChannel)_engine.Preview.Channel)?.Owner.MediaDirectory;
                 AnimationDirectoryPRV = ((CasparServerChannel)_engine.Preview.Channel)?.Owner.AnimationDirectory;
             }
+            _archiveAutomation = new ArchiveAutomation(_engine, this);
             var initTasks = new Task[] {
                 Task.Run(InitializeMediaDirectoryPRI),
                 Task.Run(InitializeMediaDirectorySEC),
@@ -554,13 +563,13 @@ namespace TAS.Server
         private void _mediaPRIVerified(object o, MediaEventArgs e)
         {
             if (e.Media.MediaStatus != TMediaStatus.Available) return;
+            _engine.NotifyMediaVerified(e); // also refresh event references on single-server systems
             if (!(MediaDirectorySEC is ServerDirectory sec) 
                 || !(MediaDirectoryPRI is ServerDirectory pri) 
                 || sec == pri 
                 || !sec.IsInitialized 
                 || !pri.IsInitialized)
                 return;
-            _engine.NotifyMediaVerified(e);
             var sEcMedia = sec.FindMediaByMediaGuid(e.Media.MediaGuid);
             if (sEcMedia != null)
                 return;
@@ -679,6 +688,7 @@ namespace TAS.Server
             if (_disposed)
                 return;
             _disposed = true;
+            _archiveAutomation?.Dispose();
             foreach(var action in _delegateUnregisterActions)
                 action();
         }

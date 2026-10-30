@@ -168,6 +168,14 @@ namespace TAS.Client.Config
         private bool _tryContinueRundownAfterEngineRestart;
         public bool TryContinueRundownAfterEngineRestart { get => _tryContinueRundownAfterEngineRestart; set => SetField(ref _tryContinueRundownAfterEngineRestart, value); }
 
+        private bool _autoArchiveAfterIngest, _autoRestoreEnabled, _restoreEntireRundown;
+        private int _restoreHorizonHours = 72, _restoreMaxConcurrentJobs = 1;
+        public bool AutoArchiveAfterIngest { get => _autoArchiveAfterIngest; set => SetField(ref _autoArchiveAfterIngest, value); }
+        public bool AutoRestoreEnabled { get => _autoRestoreEnabled; set => SetField(ref _autoRestoreEnabled, value); }
+        public bool RestoreEntireRundown { get => _restoreEntireRundown; set => SetField(ref _restoreEntireRundown, value); }
+        public int RestoreHorizonHours { get => _restoreHorizonHours; set { if (value <= 0) throw new ArgumentOutOfRangeException(nameof(RestoreHorizonHours), "Use positive hours."); SetField(ref _restoreHorizonHours, value); } }
+        public int RestoreMaxConcurrentJobs { get => _restoreMaxConcurrentJobs; set { if (value < 1 || value > 16) throw new ArgumentOutOfRangeException(nameof(RestoreMaxConcurrentJobs), "Use 1 to 16 jobs."); SetField(ref _restoreMaxConcurrentJobs, value); } }
+
         public Common.UiCommand CommandManageArchiveDirectories { get; }
 
         protected override void Update(object destObject = null)

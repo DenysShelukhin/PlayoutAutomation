@@ -616,6 +616,7 @@ namespace TAS.Server
             var media = aEvent.Engine.PlayoutChannelPRI == this ? aEvent.ServerMediaPRI : aEvent.ServerMediaSEC;
             if (aEvent.EventType != TEventType.Live && media == null)
                 return null;
+            if (aEvent.EventType == TEventType.Movie && !CanLoadCompleteMedia(media)) return null;
             var item = new Svt.Caspar.CasparItem(string.Empty);
             if (aEvent.IsMovieOrStill())
             {
@@ -649,7 +650,7 @@ namespace TAS.Server
 
         private Svt.Caspar.CasparItem _getItem(MediaBase media, VideoLayer videolayer, long seek)
         {
-            if (media != null && media.MediaType == TMediaType.Movie)
+            if (media != null && media.MediaType == TMediaType.Movie && CanLoadCompleteMedia(media))
             {
                 return new Svt.Caspar.CasparItem(string.Empty)
                 {
@@ -665,7 +666,7 @@ namespace TAS.Server
 
         private Svt.Caspar.CasparItem _getItem(MediaBase media, VideoLayer videolayer)
         {
-            if (media != null && (media.MediaType == TMediaType.Movie || media.MediaType == TMediaType.Still))
+            if (media != null && (media.MediaType == TMediaType.Movie || media.MediaType == TMediaType.Still) && CanLoadCompleteMedia(media))
                 return new Svt.Caspar.CasparItem(string.Empty)
                 {
                     Clipname = BroadcastProducer($"\"{(media is ServerMedia ? Path.GetFileNameWithoutExtension(media.FileName) : media.FullPath)}\"", media),
@@ -678,6 +679,18 @@ namespace TAS.Server
         private string BroadcastProducer(string quotedName, MediaBase media)
             => MediaOperation.BroadcastPlayout.Producer(quotedName, Owner.CasparServerType.IsForkTVP(),
                 media.MediaType == TMediaType.Movie, media.VideoFormat, VideoFormat);
+
+        private static bool CanLoadCompleteMedia(MediaBase media)
+        {
+            if (!(media is ServerMedia) || media.MediaType != TMediaType.Movie) return true;
+            try
+            {
+                return media.MediaStatus == TMediaStatus.Available && media.FileExists() &&
+                    (ulong)new FileInfo(media.FullPath).Length == media.FileSize;
+            }
+            catch (IOException) { return false; }
+            catch (UnauthorizedAccessException) { return false; }
+        }
 
         private TVideoFormat CasparModeToVideoFormat(Svt.Caspar.VideoMode mode)
         {

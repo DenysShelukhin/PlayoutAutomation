@@ -36,6 +36,81 @@ namespace TAS.Client.ViewModels
         private ObservableCollection<MediaViewViewmodel> _items = new ObservableCollection<MediaViewViewmodel>();
         private bool _isRecursive;
         private bool _showExpired;
+        private bool _includeArchive;
+        private bool _searchDisposed;
+        private int _archiveSearchVersion;
+        private IMediaSearchProvider _archiveSearch;
+        private string _archiveSearchError;
+        public string ArchiveSearchError { get => _archiveSearchError; private set => SetField(ref _archiveSearchError, value); }
+
+        public bool IncludeArchive
+        {
+            get => _includeArchive;
+            set
+            {
+                if (SetField(ref _includeArchive, value))
+                    RefreshArchiveSearch();
+            }
+        }
+
+        private void CancelArchiveSearch()
+        {
+            var previous = _archiveSearch;
+            _archiveSearch = null;
+            if (previous == null) return;
+            previous.ItemAdded -= ArchiveSearch_ItemAdded;
+            previous.Finished -= ArchiveSearch_Finished;
+            previous.Cancel();
+        }
+
+        private async void RefreshArchiveSearch()
+        {
+            int version = ++_archiveSearchVersion;
+            CancelArchiveSearch();
+            foreach (var item in Items.Where(i => i.Media is IArchiveMedia).ToArray())
+            {
+                Items.Remove(item);
+                item.Dispose();
+            }
+            if (!IncludeArchive || !IsMovie || Engine.MediaManager.ArchiveDirectory == null) return;
+            await Task.Delay(300);
+            if (_searchDisposed || version != _archiveSearchVersion) return;
+            try
+            {
+                ArchiveSearchError = null;
+                var provider = Engine.MediaManager.ArchiveDirectory.Search(null, SearchText);
+                if (provider == null) return;
+                _archiveSearch = provider;
+                provider.ItemAdded += ArchiveSearch_ItemAdded;
+                provider.Finished += ArchiveSearch_Finished;
+                provider.Start();
+            }
+            catch (Exception e) { ArchiveSearchError = "Archive search unavailable: " + e.Message; }
+        }
+
+        private void ArchiveSearch_ItemAdded(object sender, EventArgs<IMedia> e)
+        {
+            OnUiThread(() =>
+            {
+                if (_searchDisposed || sender != _archiveSearch || !CanAddMediaToCollection(e.Value, _mediaType)) return;
+                if (Items.Any(i => i.Media.MediaGuid == e.Value.MediaGuid && i.Media.MediaStatus == TMediaStatus.Available)) return;
+                Items.Add(new MediaViewViewmodel(e.Value, Engine.MediaManager));
+            });
+        }
+
+        private void ArchiveSearch_Finished(object sender, EventArgs e)
+        {
+            OnUiThread(() =>
+            {
+                if (sender is IMediaSearchProvider provider)
+                {
+                    provider.ItemAdded -= ArchiveSearch_ItemAdded;
+                    provider.Finished -= ArchiveSearch_Finished;
+                    // Keep identity until the next search: ItemAdded UI dispatches may
+                    // still be queued behind the provider's completion continuation.
+                }
+            });
+        }
 
         public MediaSearchViewmodel(IPreview preview, IEngine engine, TMediaType mediaType, VideoLayer layer,
             bool closeAfterAdd, VideoFormatDescription videoFormatDescription)
@@ -111,6 +186,7 @@ namespace TAS.Client.ViewModels
                 _itemsView?.Refresh();
                 _itemsView?.MoveCurrentToFirst();
                 SelectedItem = _itemsView?.CurrentItem as MediaViewViewmodel;
+                RefreshArchiveSearch();
             }
         }
 
@@ -369,6 +445,9 @@ namespace TAS.Client.ViewModels
 
         protected override void OnDispose()
         {
+            _searchDisposed = true;
+            ++_archiveSearchVersion;
+            CancelArchiveSearch();
             BaseEvent = null;
             if (_preview != null)
             {

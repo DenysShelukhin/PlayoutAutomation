@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="TAS.Client.Config.EngineView"
+<UserControl x:Class="TAS.Client.Config.EngineView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
@@ -26,6 +26,17 @@
             <Label Content="Video format"/>
             <ComboBox SelectedItem="{Binding VideoFormat}" ItemsSource="{Binding VideoFormats}"/>
             <Label Content="Aspect ratio control"/>
+            <Expander Header="Automatic Archive / schedule preparation" Margin="5">
+                <StackPanel>
+                    <CheckBox Content="Copy completed Ingest to Archive (keep local and Incoming)" AutomationProperties.AutomationId="AutoArchiveAfterIngest" IsChecked="{Binding AutoArchiveAfterIngest}"/>
+                    <CheckBox Content="Restore missing scheduled media automatically" AutomationProperties.AutomationId="AutoRestoreEnabled" IsChecked="{Binding AutoRestoreEnabled}"/>
+                    <Label Content="Restore horizon (positive hours; default 72)"/>
+                    <TextBox AutomationProperties.AutomationId="RestoreHorizonHours" Text="{Binding RestoreHorizonHours, ValidatesOnExceptions=True, UpdateSourceTrigger=PropertyChanged}"/>
+                    <CheckBox Content="Restore entire loaded rundown (all dates)" AutomationProperties.AutomationId="RestoreEntireRundown" IsChecked="{Binding RestoreEntireRundown}"/>
+                    <Label Content="Maximum concurrent restores (1–16; default 1)"/>
+                    <TextBox AutomationProperties.AutomationId="RestoreMaxConcurrentJobs" Text="{Binding RestoreMaxConcurrentJobs, ValidatesOnExceptions=True, UpdateSourceTrigger=PropertyChanged}"/>
+                </StackPanel>
+            </Expander>
             <ComboBox SelectedItem="{Binding AspectRatioControl}" ItemsSource="{Binding AspectRatioControls}"/>
             <Label Content="Time correction (ms, relative to system time)"/>
             <TextBox Text="{Binding TimeCorrection, UpdateSourceTrigger=PropertyChanged}"/>

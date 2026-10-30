@@ -56,6 +56,13 @@ namespace TAS.Client.Config.Model
         [Hibernate]
         public bool TryContinueRundownAfterEngineRestart { get; set; }
 
+        [Hibernate] public bool AutoArchiveAfterIngest { get; set; }
+        [Hibernate] public bool AutoRestoreEnabled { get; set; }
+        [Hibernate] public int RestoreHorizonHours { get; set; } = 72;
+        [Hibernate] public bool RestoreEntireRundown { get; set; }
+        [Hibernate] public int RestoreMaxConcurrentJobs { get; set; } = 1;
+        [Hibernate] public string ArchiveAutomationJournal { get; set; }
+
         public bool IsModified = false;
 
         public bool IsNew = true;

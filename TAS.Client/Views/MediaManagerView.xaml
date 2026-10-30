@@ -47,6 +47,10 @@
         <KeyBinding Command="{Binding CommandTogglePropertiesPanel}" Gesture="F11"/>
 
     </UserControl.InputBindings>
+    <DockPanel>
+      <Expander DockPanel.Dock="Top" Header="Automatic Archive / Restore — readiness and warnings" IsExpanded="True">
+        <ScrollViewer MaxHeight="130" VerticalScrollBarVisibility="Auto"><TextBlock AutomationProperties.AutomationId="ArchiveAutomationStatus" Text="{Binding MediaManager.AutomationStatus}" TextWrapping="Wrap" Margin="5"/></ScrollViewer>
+      </Expander>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition/>
@@ -523,4 +527,5 @@
         </Grid>
 
     </Grid>
+    </DockPanel>
 </UserControl>

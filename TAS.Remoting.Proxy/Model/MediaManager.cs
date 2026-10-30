@@ -48,6 +48,10 @@ namespace TAS.Remoting.Model
         public IEngine Engine => Get<IEngine>();
 
         public IFileManager FileManager => _fileManager;
+        [DtoMember(nameof(AutomationStatus))] private string _automationStatus;
+        public string AutomationStatus => _automationStatus;
+        [DtoMember(nameof(AutomationWarning))] private string _automationWarning;
+        public string AutomationWarning => _automationWarning;
 
         public IEnumerable<IIngestDirectory> IngestDirectories => _ingestDirectories;
 
