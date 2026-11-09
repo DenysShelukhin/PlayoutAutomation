@@ -22,7 +22,7 @@ namespace TAS.Client.VPlayMigration
         public object[] Create(IUiPluginContext context) => context is IUiEngine ? new object[] { new Plugin((IUiEngine)context) } : new object[0];
     }
 
-    public sealed class Plugin : IUiPlugin
+    public sealed partial class Plugin : IUiPlugin
     {
         // Must be created with private ACL by deployment; no network listener or service.
         internal static readonly string Home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"EWTN\Playout\Migration");
@@ -34,6 +34,7 @@ namespace TAS.Client.VPlayMigration
         {
             _context = context; _menu = new Item(this);
             _timer = new DispatcherTimer(TimeSpan.FromSeconds(15), DispatcherPriority.Background, (_, __) => Tick(), Dispatcher.CurrentDispatcher);
+            _absoluteTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(200), DispatcherPriority.Normal, (_, __) => AbsoluteTick(), Dispatcher.CurrentDispatcher);
         }
         public IUiPluginContext Context => _context;
         public IUiMenuItem Menu => _menu;
@@ -80,7 +81,12 @@ namespace TAS.Client.VPlayMigration
                 if (File.Exists(requestPath)) {
                     var request = JObject.Parse(File.ReadAllText(requestPath));
                     var action = (string)request["Action"];
-                    if (action == "RemoveExperimental") {
+                    if (action == "StartAbsoluteSchedule") {
+                        var root=Events().Single(e=>(e.IdAux??"").StartsWith("VP26R:"));
+                        root.EventName="VPLAY EWTN MAIN [ABSOLUTE Europe/Kyiv]";root.IsEnabled=true;root.Save();
+                        Save("absolute-enabled.json",new{Enabled=true,Root=root.IdAux});
+                        _absoluteSources=null;AbsoluteTick();
+                    } else if (action == "RemoveExperimental") {
                         if (!Idle) throw new IOException("Stop playback before experimental cleanup");
                         if (!(Engine is TAS.Server.Engine localEngine) || localEngine.ArchivePolicy != TArchivePolicyType.NoArchive) throw new IOException("Cleanup requires NoArchive-on-delete policy to protect media");
                         if ((bool?)request["VerifiedBackup"] != true) throw new IOException("Verified backup required");

@@ -4,6 +4,8 @@ namespace TAS.Server
 {
     public static class PlayoutCacheRules
     {
+        public static bool Request(TAS.Common.Interfaces.Media.IMedia media)
+            => media is TAS.Server.Media.MediaBase local && PlayoutCache.CanServe(local,true);
         public static bool Ready(TAS.Common.Interfaces.Media.IMedia media)
             => !(media is TAS.Server.Media.MediaBase local) || PlayoutCache.CanServe(local,false);
         public const long HardMaximum = 200000000000;

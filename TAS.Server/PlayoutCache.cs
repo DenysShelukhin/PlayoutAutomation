@@ -107,7 +107,9 @@ namespace TAS.Server
                 if(needed.ContainsKey(entry.Guid)&&media!=null&&Current(entry,media))continue;
                 // Verify content outside the producer gate; large hashes must not stall transitions.
                 if(File.Exists(Path.Combine(_root,entry.File))&&(!Available(entry)||AtomicMediaCopy.Hash(Path.Combine(_root,entry.File))!=entry.Hash))continue;
-                lock(IncomingMediaGate.Sync){
+                // Same order as native playback: rundown -> producer/media gate.
+                // Requests/GetSubEvents takes RundownSync and must never invert that order.
+                lock(_engine.RundownSync) lock(IncomingMediaGate.Sync){
                     if(needed.ContainsKey(entry.Guid)&&media!=null&&Current(entry,media))continue;
                     if(Requests().ContainsKey(entry.Guid)&&media!=null&&Current(entry,media))continue;
                     if(Protected(entry.Guid,entry)||!ArchiveConfirmed(entry,media))continue;

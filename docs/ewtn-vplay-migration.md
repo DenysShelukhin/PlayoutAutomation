@@ -1,5 +1,34 @@
 # EWTN VPlay migration and bounded playout cache
 
+## Original-date scheduled playout
+
+The local opt-in `absolute-enabled.json` mode operates the existing imported
+root; it does not import a second copy or rebase dates. All source slots remain,
+including missing media and unsupported events. The verified private native-ID
+map preserves exact original UTC ticks and duration. Native `ReadEvent` resolves
+lazy navigation gaps after restart and reuses the engine's identity cache.
+Do not obtain fractional anchors by casting a JSON date token to string.
+
+`Engine.StartAbsolute` reuses native refresh/seek with the current frame offset,
+so a ready material can join after its planned start. The controller leaves an
+already correct Program event alone. Normal ready successors use native playout;
+the absolute clock remains authoritative after missing/special slots. Native
+fixed-time auto-start is excluded for owned source events while this mode is on,
+preventing a second start from the legacy one-second auto-start window.
+
+Missing and unsupported slots have an explicit diagnostic mode. An existing,
+ready short station ID is looped only for the remaining source slot; it is not
+declared the equivalent of an Empty Block/live event. If no ready diagnostic
+material exists, Program is cleared and the clock continues. Outside the XML
+date range no historical source is started as current. The opt-in marker resumes
+the controller on TVPlay restart. Status and as-run diagnostics stay private.
+
+The companion infrastructure worker runs continuously via a single interactive
+user Scheduled Task, with logon/watchdog recovery and IgnoreNew concurrency.
+It keeps the existing native Incoming/Ingest/Archive/cache path. Production reads
+are capped at 20MiB/s, one copy; pause/rate control is private per task. Worker
+restart never restarts Program or resets the durable delivery ledger.
+
 2026-11-09. Opt-in local client plugin plus a narrow native persistence fix and
 server-side playout cache. No schema change, remote listener or TVPlayClient
 requirement. The existing Incoming/BRv1/Archive/Restore path remains authoritative.

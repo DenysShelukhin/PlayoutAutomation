@@ -480,6 +480,24 @@ namespace TAS.Server
             _startLoaded();
         }
 
+        public bool AbsoluteScheduleEnabled { get; set; }
+        // Local schedule controller: preserve source UTC anchor and native frame seek.
+        public void StartAbsolute(IEvent source, DateTime anchor)
+        {
+            if (!HaveRight(EngineRight.Play) || !(source is Event ev) || ev.EventType != TEventType.Movie || ev.Media == null || ev.Media.MediaStatus != TMediaStatus.Available || !ev.Media.FileExists() || !PlayoutCacheRules.Ready(ev.Media))
+                throw new InvalidOperationException("Absolute start requires a ready movie and Play right");
+            lock (RundownSync) {
+                var elapsed = CurrentTime - anchor;
+                if (elapsed < TimeSpan.Zero || elapsed >= ev.Duration) throw new InvalidOperationException("Absolute anchor outside event");
+                _clearRunning();
+                ev.IsEnabled = true;
+                ev.InternalSetPlaying(anchor, elapsed.Ticks / FrameTicks);
+                _run(ev); SetVisibleEvent(ev); _setPlaying(ev);
+                EngineState = TEngineState.Running;
+                _refreshVisibleEventOnPlayer(ev, true); ev.Save();
+            }
+        }
+
         public void Start(IEvent aEvent)
         {
             if (!HaveRight(EngineRight.Play))
@@ -1336,6 +1354,7 @@ namespace TAS.Server
             {
                 var startEvent = _fixedTimeEvents
                     .FirstOrDefault(e =>
+                                    !(AbsoluteScheduleEnabled && (e.IdAux ?? "").StartsWith("VP26E:")) &&
                                     e.StartType == TStartType.OnFixedTime &&
                                     (EngineState == TEngineState.Idle || (e.AutoStartFlags & AutoStartFlags.Force) == AutoStartFlags.Force) &&
                                     (e.PlayState == TPlayState.Scheduled || (e.PlayState != TPlayState.Playing && (e.AutoStartFlags & AutoStartFlags.Force) == AutoStartFlags.Force)) &&
@@ -1361,6 +1380,11 @@ namespace TAS.Server
             if (playingEvent == null)
                 return null;
             result = (playingEvent.IsLoop ? playingEvent : playingEvent.InternalGetSuccessor()) ?? playingEvent.GetVisualRootTrack().FirstOrDefault(e => e.IsLoop) as Event;
+            if (AbsoluteScheduleEnabled && (playingEvent.IdAux ?? "").StartsWith("VP26E:")) {
+                if (result == null || result.EventType != TEventType.Movie || !(result.IdAux ?? "").StartsWith("VP26E:") || !PlayoutCacheRules.Ready(result.Media)
+                    || Math.Abs((result.ScheduledTime - playingEvent.ScheduledTime - playingEvent.Duration).Ticks) > FrameTicks) return null;
+                result.IsEnabled = true; // native preload/PLAY handles contiguous ready events
+            }
             return result;
         }
 
