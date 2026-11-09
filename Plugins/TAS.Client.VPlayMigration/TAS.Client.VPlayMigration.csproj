@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Library</OutputType><UseWPF>true</UseWPF><ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets><AssemblyTitle>EWTN VPlay migration</AssemblyTitle><FileVersion>1.8.9390.5</FileVersion></PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.ComponentModel.Composition" />
+    <ProjectReference Include="..\..\TAS.Client.Common\TAS.Client.Common.csproj" />
+    <ProjectReference Include="..\..\TAS.Common\TAS.Common.csproj" />
+    <ProjectReference Include="..\..\TAS.Server\TAS.Server.csproj" />
+  </ItemGroup>
+</Project>

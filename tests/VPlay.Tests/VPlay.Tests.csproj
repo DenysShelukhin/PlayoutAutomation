@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup><ProjectReference Include="..\..\Plugins\TAS.Client.VPlayMigration\TAS.Client.VPlayMigration.csproj" /></ItemGroup>
+</Project>
