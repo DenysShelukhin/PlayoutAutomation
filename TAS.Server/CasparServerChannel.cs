@@ -734,7 +734,7 @@ namespace TAS.Server
         }
 
         private string BroadcastProducer(string quotedName, MediaBase media)
-            => MediaOperation.BroadcastPlayout.Producer(quotedName, Owner.CasparServerType.IsForkTVP(),
+            => MediaOperation.BroadcastPlayout.Producer(PlayoutCache.PlaybackName(media,quotedName), Owner.CasparServerType.IsForkTVP(),
                 media.MediaType == TMediaType.Movie, media.VideoFormat, VideoFormat);
 
         private static bool CanLoadCompleteMedia(MediaBase media)
@@ -743,7 +743,7 @@ namespace TAS.Server
             try
             {
                 return media.MediaStatus == TMediaStatus.Available && media.FileExists() &&
-                    (ulong)new FileInfo(media.FullPath).Length == media.FileSize;
+                    (ulong)new FileInfo(media.FullPath).Length == media.FileSize && PlayoutCache.CanServe(media);
             }
             catch (IOException) { return false; }
             catch (UnauthorizedAccessException) { return false; }

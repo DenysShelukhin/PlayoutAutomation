@@ -1,9 +1,51 @@
-# EWTN VPlay migration candidate
+# EWTN VPlay migration and bounded playout cache
 
-2026-11-09. Additive, opt-in client plugin; no core DLL/schema change, no remote
-listener and no TVPlayClient requirement. This is a candidate until native import
-and playout have been accepted on AIR-02. The existing Incoming/BRv1/Archive path
-is reused; this plugin does not encode, copy source video, delete media or evict cache.
+2026-11-09. Opt-in local client plugin plus a narrow native persistence fix and
+server-side playout cache. No schema change, remote listener or TVPlayClient
+requirement. The existing Incoming/BRv1/Archive/Restore path remains authoritative.
+The plugin creates events through the application model and never writes SQL.
+AIR-02 acceptance evidence and operational rollback belong in the private
+infrastructure documentation; source data and media must not enter this repository.
+
+## Storage and admission
+
+The registered library remains on D: and native Ingest still publishes on that
+volume. Archive stays on E:. `PlayoutCache` mirrors archive-confirmed ready media
+to the private NTFS `C:\ProgramData\EWTN\Playout\Cache` directory. Caspar movie
+producers receive verified absolute cache paths, retaining the same native GUID.
+Missing cache copies are Not Ready; they are never silently played from D:.
+
+Opt-in policy is `Migration/cache-settings.json`: `Enabled`, `MaxBytes` (at most
+200000000000 decimal bytes), `HorizonHours` (1..72). No configuration means the
+previous D: producer behavior. The registered Media root must not be switched
+to C:, because Incoming uses same-volume publication. Restart is required for
+policy changes. Configuration/index/status live outside the capped media directory.
+
+The single worker enumerates native future movie events in air-time order and
+deduplicates by GUID. Disabled imported inventory can request preparation, never
+playback. Preview/manual producer requests add a short explicit demand; reading
+readiness alone does not request copies. Partial and unknown root files count
+toward the cap; unknown directories block admission. Each full file is reserved
+before copy, with a further 64GiB system free-space reserve. Oversized/protected
+sets stay Not Ready. File size is leased during copy; SHA verification and atomic
+same-volume publication reuse native `AtomicMediaCopy`. Completed index entries
+persist across restart; interrupted owned partials are never playable and count
+toward capacity until their deterministic copy is retried.
+
+Eviction only removes owned cache files no longer requested (or superseded).
+Program/Preview/preload, physical Caspar producers, native operations, pending
+archive revisions, changed archive proof and disconnected channels prevent it.
+Content verification happens outside the producer gate; the final identity,
+producer protection and delete are checked together under that gate. D:/E:
+files, database rows and GUIDs are never deleted by eviction. A changed archive
+proof is deliberately retained for review. External administrator writes to the
+private root are outside the worker's quota contract and block further admission.
+
+`PlayoutCacheRules` tests cover exact byte boundaries, reservations, overflow,
+past/future clock movement and the 72h boundary. Native import tests also verify
+that INSERT and UPDATE actually persist `IdAux`; the previous provider only read
+that field, losing source identity after restart. Existing null identities remain
+compatible. Keep the SQLite provider fix when rolling back just the cache.
 
 ## Import contract
 

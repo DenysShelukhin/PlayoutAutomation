@@ -69,7 +69,7 @@ namespace TAS.Client.VPlayMigration
             while (stack.Count != 0) { var e = stack.Pop(); if (e == null || e.IsDeleted || !seen.Add(e)) continue; yield return e; foreach (var child in e.GetSubEvents()) stack.Push(child); var next = e.GetNext(); if (next != null) stack.Push(next); }
         }
         private bool Idle => Engine.Playing == null && !Events().Any(e => e.PlayState == TPlayState.Playing || e.PlayState == TPlayState.Fading);
-        private static bool Ready(IMedia media) => media != null && media.MediaStatus == TMediaStatus.Available && media.FileExists();
+        private static bool Ready(IMedia media) => media != null && media.MediaStatus == TMediaStatus.Available && media.FileExists() && TAS.Server.PlayoutCacheRules.Ready(media);
         private void Tick()
         {
             if (!File.Exists(Path.Combine(Home, "enabled"))) return;
@@ -80,7 +80,63 @@ namespace TAS.Client.VPlayMigration
                 if (File.Exists(requestPath)) {
                     var request = JObject.Parse(File.ReadAllText(requestPath));
                     var action = (string)request["Action"];
-                    if (action == "Import") {
+                    if (action == "RemoveExperimental") {
+                        if (!Idle) throw new IOException("Stop playback before experimental cleanup");
+                        if (!(Engine is TAS.Server.Engine localEngine) || localEngine.ArchivePolicy != TArchivePolicyType.NoArchive) throw new IOException("Cleanup requires NoArchive-on-delete policy to protect media");
+                        if ((bool?)request["VerifiedBackup"] != true) throw new IOException("Verified backup required");
+                        var wanted = ((JArray)request["Roots"]).Cast<JObject>().ToArray();
+                        var roots = Engine.GetRootEvents().ToArray(); var selected = new List<IEvent>();
+                        foreach (var item in wanted) {
+                            var root = roots.SingleOrDefault(e => e.Id == (ulong)item["Id"] && e.EventName == (string)item["Name"]);
+                            if (root == null || (root.IdAux ?? "").StartsWith("VP26", StringComparison.Ordinal)) throw new IOException("Cleanup identity changed or migration root selected");
+                            selected.Add(root);
+                        }
+                        var nodes = selected.SelectMany(Descendants).Distinct().ToArray();
+                        if (nodes.Any(e => e.PlayState == TPlayState.Playing || e.PlayState == TPlayState.Fading || e.PlayState == TPlayState.Paused)) throw new IOException("Protected event still active");
+                        Save("cleanup-before.json", new { Utc = DateTime.UtcNow, Events = nodes.Select(e => new { e.Id, e.IdAux, e.EventName, e.MediaGuid }).ToArray() });
+                        foreach (var root in selected) DeleteExperimental(root);
+                        if (selected.Any(e => !e.IsDeleted)) throw new IOException("Native deletion incomplete; retained events require review");
+                    } else if (action == "RestoreCheck") {
+                        if (!Idle || System.Diagnostics.Process.GetProcessesByName("ffmpeg").Length != 0) throw new IOException("Restore check requires idle and no encoder");
+                        var id = Guid.Parse((string)request["MediaGuid"]);
+                        var local = Engine.MediaManager.MediaDirectoryPRI as ServerDirectory;
+                        var archive = Engine.MediaManager.ArchiveDirectory as ArchiveDirectory;
+                        var media = local?.FindMediaByMediaGuid(id) as ServerMedia;
+                        var archived = archive?.Find(id) as ArchiveMedia;
+                        if (!Ready(media) || !Ready(archived) || !media.MediaName.StartsWith("vplay_", StringComparison.Ordinal)) throw new IOException("Owned ready media and archive required");
+                        // Require all physical producers to be clear, including orphan producers after restart.
+                        if (Environment.MachineName != "AIR-02" || Engine.PlayoutChannelPRI.Id != 1 || Engine.Preview?.Channel.Id != 2) throw new IOException("Restore check is scoped to verified AIR-02 channels 1/2");
+                        foreach (var channel in new [] {1,2}) using (var client = new System.Net.Sockets.TcpClient()) {
+                            var connecting = client.ConnectAsync("127.0.0.1", 5250);
+                            if (!connecting.Wait(1500)) throw new IOException("Caspar unavailable");
+                            var stream = client.GetStream(); stream.ReadTimeout = 1500;
+                            var command = System.Text.Encoding.UTF8.GetBytes("INFO " + channel + "\r\n"); stream.Write(command, 0, command.Length);
+                            var data = new System.Text.StringBuilder(); var buffer = new byte[16384];
+                            while (!data.ToString().Contains("</channel>")) { var n = stream.Read(buffer, 0, buffer.Length); if (n == 0 || data.Length > 1048576) throw new IOException("Invalid Caspar state"); data.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, n)); }
+                            if (data.ToString().Contains("<filename>")) throw new IOException("Clear Program/Preview/preload before restore check");
+                        }
+                        var hash = FileHash(media.FullPath);
+                        if (hash != FileHash(archived.FullPath)) throw new IOException("Archive hash not confirmed");
+                        var hold = @"D:\EWTN\Lab\VPlayRestoreHold"; Directory.CreateDirectory(hold);
+                        if ((File.GetAttributes(hold) & FileAttributes.ReparsePoint) != 0 || Path.GetPathRoot(hold) != Path.GetPathRoot(media.FullPath)) throw new IOException("Invalid restore hold root");
+                        var held = Path.Combine(hold, id.ToString("N") + ".mov"); if (File.Exists(held)) throw new IOException("Prior restore hold retained; review before retry");
+                        Save("restore-check.json", new { MediaGuid = id, Original = media.FullPath, Held = held, Hash = hash, Utc = DateTime.UtcNow });
+                        media.MediaStatus = TMediaStatus.Required; media.Save();
+                        File.Move(media.FullPath, held); // Required status preserves GUID when watcher observes absence.
+                        var container = Engine.GetRootEvents().SingleOrDefault(e => e.IdAux == "VP26PREPARATION");
+                        if (container == null) { container = Engine.CreateNewEvent(eventType:TEventType.Container, startType:TStartType.Manual, eventName:"VPLAY preparation references [MANUAL]", idAux:"VP26PREPARATION"); Engine.AddRootEvent(container); container.Save(); }
+                        var reference = Engine.CreateNewEvent(videoLayer:VideoLayer.Program,eventType:TEventType.Movie,startType:TStartType.Manual,scheduledTime:DateTime.UtcNow.AddMinutes(5),duration:TimeSpan.FromSeconds(1),mediaGuid:id,eventName:"Restore verification reference",idAux:"VP26P:"+id.ToString("N"));
+                        container.InsertUnder(reference,false);reference.Save();
+                    } else if (action == "RecoverTrace") {
+                        if (!Idle) throw new IOException("Trace recovery requires idle");
+                        var rows = JArray.Parse(File.ReadAllText(Within(Path.Combine(Home, "native-links-recovery.json"))));
+                        var events = Events().ToDictionary(e => e.Id);
+                        foreach (JObject row in rows) {
+                            if (!events.TryGetValue((ulong)row["Id"], out var e) || e.EventName != (string)row["EventName"] || e.Duration.Ticks != (long)row["DurationTicks"] || e.ScheduledTime.Ticks != (long)row["ScheduledTicks"]) throw new IOException("Native trace recovery identity mismatch");
+                            if (!((string)row["IdAux"] ?? "").StartsWith("VP26", StringComparison.Ordinal)) throw new IOException("Nonmigration trace rejected");
+                        }
+                        foreach (JObject row in rows) { var e = events[(ulong)row["Id"]]; e.IdAux = (string)row["IdAux"]; e.Save(); }
+                    } else if (action == "Import") {
                         var path = Within(Path.Combine(Home, (string)request["File"]));
                         if (!path.EndsWith(".rundown", StringComparison.OrdinalIgnoreCase)) throw new IOException("Expected .rundown");
                         var node = JObject.Parse(File.ReadAllText(path)); Validate(node, true, 0);
@@ -99,6 +155,11 @@ namespace TAS.Client.VPlayMigration
                             var created = Create(node, null, null, true);
                             Save("import-" + Token(id) + ".json", new { IdAux = id, Id = created.Id, Fingerprint = fingerprint, CompletedUtc = DateTime.UtcNow });
                         }
+                    } else if (action == "ResetTest") {
+                        if (!Idle) throw new IOException("Test reset requires idle");
+                        var id=(string)request["IdAux"];if(id==null||!id.StartsWith("VP26TEST:"))throw new IOException("Only test roots may be rescheduled");
+                        var root=Events().Single(e=>e.IdAux==id);Engine.ReSchedule(root);root.ScheduledTime=Engine.CurrentTime.AddSeconds(30);root.Save();
+                        foreach(var e in Descendants(root))e.Save();
                     } else if (action == "PlayTest") {
                         if (!Idle) throw new IOException("Existing playback active; test start refused");
                         var id = (string)request["IdAux"];
@@ -119,6 +180,18 @@ namespace TAS.Client.VPlayMigration
             }
         }
         private static string Token(string id) => string.Concat(id.Where(char.IsLetterOrDigit));
+        private static string FileHash(string path) { using(var sha=System.Security.Cryptography.SHA256.Create())using(var stream=File.OpenRead(path))return BitConverter.ToString(sha.ComputeHash(stream)); }
+        private void DeleteExperimental(IEvent root)
+        {
+            // Native Container refuses deletion while nonempty. Empty children first;
+            // native Event.Delete touches events only, and NoArchive guard excludes media moves.
+            foreach (var child in root.GetSubEvents().ToArray()) {
+                var current = child;
+                while (current != null) { var next = current.GetNext(); DeleteExperimental(current); current = next; }
+            }
+            if (!root.AllowDelete()) throw new IOException("Native event deletion refused: " + root.Id);
+            root.Delete();
+        }
         internal static void Validate(JObject node, bool root, int depth)
         {
             if (depth > 4) throw new IOException("Tree depth exceeds supported migration layout");
@@ -169,7 +242,7 @@ namespace TAS.Client.VPlayMigration
                 var key = (string)asset["Key"]; var name = (string)asset["LogicalName"];
                 var matches = media.Where(m => string.Equals(m.MediaName, name, StringComparison.OrdinalIgnoreCase)).ToArray();
                 var state = matches.Length > 1 ? "Ambiguous" : "Missing"; IMedia found = matches.SingleOrDefault(m => matches.Length == 1);
-                if (found != null) { asset["MediaGuid"] = found.MediaGuid.ToString(); state = Ready(found) ? "Ready" : "Ingesting"; }
+                if (found != null) { asset["MediaGuid"] = found.MediaGuid.ToString(); state = Ready(found) ? "Ready" : found.MediaStatus == TMediaStatus.Available && found.FileExists() ? "Not Ready / Cache Pending" : "Ingesting"; }
                 else if (Guid.TryParse((string)asset["MediaGuid"], out var id) && id != Guid.Empty) {
                     var archived = Engine.MediaManager.ArchiveDirectory?.Find(id); if (Ready(archived)) state = "Archived / Restore Pending";
                 }

@@ -887,6 +887,7 @@ namespace TAS.Database.SQLite
 #endif
             cmd.Parameters.AddWithValue("@typTransition", (ushort)aEvent.TransitionType | ((ushort)aEvent.TransitionEasing) << 8);
             cmd.Parameters.AddWithValue("@idProgramme", aEvent.IdProgramme);
+            cmd.Parameters.AddWithValue("@idAux", TrimText("rundownevent", "idAux", aEvent.IdAux));
             if (aEvent.AudioVolume == null)
                 cmd.Parameters.AddWithValue("@AudioVolume", DBNull.Value);
             else
@@ -926,9 +927,9 @@ namespace TAS.Database.SQLite
                 using (var transaction = Connection.BeginTransaction())
                 {
                     const string query = @"INSERT INTO rundownevent 
-(idEngine, idEventBinding, Layer, typEvent, typStart, ScheduledTime, ScheduledDelay, Duration, ScheduledTC, MediaGuid, EventName, PlayState, StartTime, StartTC, RequestedStartTime, TransitionTime, TransitionPauseTime, typTransition, AudioVolume, idProgramme, flagsEvent, Commands, RouterPort, RecordingInfo) 
+(idEngine, idEventBinding, Layer, typEvent, typStart, ScheduledTime, ScheduledDelay, Duration, ScheduledTC, MediaGuid, EventName, PlayState, StartTime, StartTC, RequestedStartTime, TransitionTime, TransitionPauseTime, typTransition, AudioVolume, idProgramme, idAux, flagsEvent, Commands, RouterPort, RecordingInfo)
 VALUES 
-(@idEngine, @idEventBinding, @Layer, @typEvent, @typStart, @ScheduledTime, @ScheduledDelay, @Duration, @ScheduledTC, @MediaGuid, @EventName, @PlayState, @StartTime, @StartTC, @RequestedStartTime, @TransitionTime, @TransitionPauseTime, @typTransition, @AudioVolume, @idProgramme, @flagsEvent, @Commands, @RouterPort, @RecordingInfo);";
+(@idEngine, @idEventBinding, @Layer, @typEvent, @typStart, @ScheduledTime, @ScheduledDelay, @Duration, @ScheduledTC, @MediaGuid, @EventName, @PlayState, @StartTime, @StartTC, @RequestedStartTime, @TransitionTime, @TransitionPauseTime, @typTransition, @AudioVolume, @idProgramme, @idAux, @flagsEvent, @Commands, @RouterPort, @RecordingInfo);";
                     using (var cmd = new DbCommand(query, Connection))
                         if (EventFillParamsAndExecute(cmd, aEvent))
                         {
@@ -972,6 +973,7 @@ TransitionPauseTime=@TransitionPauseTime,
 typTransition=@typTransition, 
 AudioVolume=@AudioVolume, 
 idProgramme=@idProgramme, 
+idAux=@idAux,
 flagsEvent=@flagsEvent,
 Commands=@Commands,
 RouterPort=@RouterPort,

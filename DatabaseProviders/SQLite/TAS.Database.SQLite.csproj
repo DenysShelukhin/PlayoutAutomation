@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <FileVersion>1.8.9390.5</FileVersion><InformationalVersion>1.8.9390-ewtn.5</InformationalVersion>
     <OutputType>Library</OutputType>
     <DefineConstants>SQLITE</DefineConstants>
   </PropertyGroup>

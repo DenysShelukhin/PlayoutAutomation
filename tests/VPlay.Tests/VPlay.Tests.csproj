@@ -1,4 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
-  <ItemGroup><ProjectReference Include="..\..\Plugins\TAS.Client.VPlayMigration\TAS.Client.VPlayMigration.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="..\..\Plugins\TAS.Client.VPlayMigration\TAS.Client.VPlayMigration.csproj" /><ProjectReference Include="..\..\DatabaseProviders\SQLite\TAS.Database.SQLite.csproj" /></ItemGroup>
 </Project>

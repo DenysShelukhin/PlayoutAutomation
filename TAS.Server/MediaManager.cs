@@ -31,14 +31,17 @@ namespace TAS.Server
         private bool _disposed;
         private ArchiveAutomation _archiveAutomation;
         private IncomingCoordinator _incoming;
+        private PlayoutCache _playoutCache;
+        private string _cacheStatus,_cacheWarning;
+        internal void SetCacheStatus(string status,string warning){_cacheStatus=status;_cacheWarning=warning;NotifyPropertyChanged(nameof(AutomationStatus));NotifyPropertyChanged(nameof(AutomationWarning));}
         private string _incomingStatus="Incoming OFF";
         [DtoMember] public string IncomingStatus {get=>_incomingStatus;private set=>SetField(ref _incomingStatus,value);}
         internal void SetIncomingStatus(string value)=>IncomingStatus=value;
         private string _automationStatus = "Automatic Archive / Restore disabled";
-        [DtoMember] public string AutomationStatus { get => _automationStatus; private set => SetField(ref _automationStatus, value); }
+        [DtoMember] public string AutomationStatus { get => _automationStatus+(string.IsNullOrEmpty(_cacheStatus)?"":"\n"+_cacheStatus); private set => SetField(ref _automationStatus, value); }
         internal void SetAutomationStatus(string value) => AutomationStatus = value;
         private string _automationWarning;
-        [DtoMember] public string AutomationWarning { get => _automationWarning; private set => SetField(ref _automationWarning, value); }
+        [DtoMember] public string AutomationWarning { get => _automationWarning+(string.IsNullOrEmpty(_cacheWarning)?"":" | "+_cacheWarning); private set => SetField(ref _automationWarning, value); }
         internal void SetAutomationWarning(string value) => AutomationWarning = value;
         internal void ScheduleChanged() => _archiveAutomation?.ScheduleChanged();
 
@@ -105,6 +108,7 @@ namespace TAS.Server
             await Task.WhenAll(initTasks);
             InitialMediaSynchronization();
             _incoming=new IncomingCoordinator(_engine,this,_archiveAutomation);
+            _playoutCache=new PlayoutCache(_engine,this,_archiveAutomation);
             Logger.Debug("End initializing");
         }
 
@@ -694,6 +698,7 @@ namespace TAS.Server
                 return;
             _disposed = true;
             _incoming?.Dispose();
+            _playoutCache?.Dispose();
             _archiveAutomation?.Dispose();
             foreach(var action in _delegateUnregisterActions)
                 action();
