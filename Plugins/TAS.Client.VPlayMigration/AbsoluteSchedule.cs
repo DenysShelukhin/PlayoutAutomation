@@ -41,13 +41,6 @@ namespace TAS.Client.VPlayMigration
                 }
                 var now=engine.CurrentTime;var slot=_absoluteSources.FirstOrDefault(s=>s.Begin<=now&&s.End>now);
                 engine.AbsoluteScheduleEnabled=true;
-                // Warm the next immediate Ready producer before its air anchor;
-                // keep the current foreground/filler running until the boundary.
-                var upcoming=_absoluteSources.FirstOrDefault(s=>s.Begin>now);
-                if(upcoming!=null&&upcoming.Begin-now<TimeSpan.FromSeconds(30)){
-                    var next=(string)upcoming.Source["ParseStatus"]=="Pending"?upcoming.Event:ResolveFileOverride(upcoming);
-                    if(next!=null&&next.EventType==TEventType.Movie&&Ready(next.Media))engine.PrepareAbsolute(next);
-                }
                 string mode,reason;int sequence=0;double offset=0;
                 if(slot==null){mode="Outside XML dates / waiting";reason="No historical event is started as current";}
                 else {
@@ -72,6 +65,14 @@ namespace TAS.Client.VPlayMigration
                             if(engine.Playing!=_diagnosticFiller)engine.StartAbsolute(_diagnosticFiller,now);
                         }else if(engine.Playing!=null)engine.Clear(VideoLayer.Program);
                     }
+                }
+                // Consume the current prepared producer before preparing its
+                // successor. A short (<30s) current slot must not lose its own
+                // warm background to next-slot preparation at the same tick.
+                var upcoming=_absoluteSources.FirstOrDefault(s=>s.Begin>now);
+                if(upcoming!=null&&upcoming.Begin-now<TimeSpan.FromSeconds(30)){
+                    var next=(string)upcoming.Source["ParseStatus"]=="Pending"?upcoming.Event:ResolveFileOverride(upcoming);
+                    if(next!=null&&next.EventType==TEventType.Movie&&Ready(next.Media))engine.PrepareAbsolute(next);
                 }
                 var state=sequence+":"+mode;
                 var report=new{Utc=DateTime.UtcNow,Mode=mode,Reason=reason,Sequence=sequence,SourceBeginUtc=slot?.Begin,SourceEndUtc=slot?.End,ExpectedOffsetSeconds=offset,PlayingId=engine.Playing?.Id,NativePlayingPosition=(engine.Playing as TAS.Server.Event)?.Position,OriginalDates=true,TimeZone="Europe/Kyiv"};
