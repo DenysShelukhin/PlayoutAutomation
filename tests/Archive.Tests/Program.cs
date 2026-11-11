@@ -15,6 +15,14 @@ internal static class Program
     static void Check(bool pass, string name) { if (!pass) throw new Exception(name); checks++; Console.WriteLine("PASS " + name); }
     static async Task Tests(string root)
     {
+        var retry=new IncomingJob{Id=Guid.NewGuid(),Target=Guid.NewGuid(),Input="retained.mov",InputHash="original-hash",State="Failed",Error="original strict colour error",
+            ContinuityRetryPending=true,ContinuityRetryGeneration="approved-generation",QcHistory=new System.Collections.Generic.List<string>{"original strict colour error"}};
+        using(var continuityJournal=new MemoryStream()){
+            var continuitySerializer=new System.Runtime.Serialization.Json.DataContractJsonSerializer(typeof(IncomingJob));continuitySerializer.WriteObject(continuityJournal,retry);continuityJournal.Position=0;
+            var restored=(IncomingJob)continuitySerializer.ReadObject(continuityJournal);
+            Check(restored.Id==retry.Id&&restored.Target==retry.Target&&restored.Input==retry.Input&&restored.InputHash==retry.InputHash,"continuity retry restart preserves native ID, GUID and exact retained input");
+            Check(restored.State=="Failed"&&restored.Error==retry.Error&&restored.ContinuityRetryPending&&restored.QcHistory[0]==retry.Error,"retry intent preserves prior failure and does not reserve a healthy queued slot");
+        }
         // Real archive methods under a deliberately slow coordinator lock:
         // a caller holding the playback gate must return conservatively at once.
         var archive=(ArchiveAutomation)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(ArchiveAutomation));

@@ -25,6 +25,10 @@ namespace TAS.Server
         [DataMember] public int Attempts;
         [DataMember] public bool InputDeleted,OldDeleted,OldArchiveDeleted;
         [DataMember] public IncomingSnapshot Previous;
+        [DataMember] public string QcMode,ContinuityRetryGeneration;
+        [DataMember] public List<string> QcHistory;
+        [DataMember] public string[] QcWarnings;
+        [DataMember] public bool ContinuityRetryPending;
     }
     [DataContract] internal sealed class IncomingSnapshot
     {
@@ -88,9 +92,13 @@ namespace TAS.Server
             if(Interlocked.Exchange(ref _running,1)!=0)return;
             try{lock(_sync){if(_disposed || !Local.IsInitialized || !Profile.IsInitialized)return;
                 if(_startupEncoderGate){if(System.Diagnostics.Process.GetProcessesByName("ffmpeg").Length>0){_manager.SetIncomingStatus("Incoming waiting: encoder from previous/external session still active");return;}_startupEncoderGate=false;}
-                Scan();foreach(var j in _jobs.Where(j=>j.State!="Done"&&j.State!="Failed").OrderBy(j=>j.Created).ToArray()){
+                Scan();ApplyContinuityRetries();
+                bool continuity=BroadcastContinuityQc.Enabled;var airNow=DateTime.UtcNow;
+                foreach(var j in _jobs.Where(j=>j.State!="Done"&&(j.State!="Failed"||continuity&&j.ContinuityRetryPending))
+                    .OrderBy(j=>j.State=="Encoding"?0:j.State=="Ready"||j.State=="Publishing"?1:j.State=="Queued"||j.ContinuityRetryPending?2:3)
+                    .ThenBy(j=>continuity&&(j.State=="Queued"||j.ContinuityRetryPending)?(BroadcastContinuityQc.Due(j.Name,airNow)??DateTime.MaxValue).Ticks:j.Created).ToArray()){
                     if(j.Retry>DateTime.UtcNow.Ticks)continue;
-                    try{Advance(j);}catch(Exception ex){Fail(j,ex);}
+                    try{Advance(j);}catch(Exception ex){if(j.ContinuityRetryPending){j.ContinuityRetryPending=false;j.QcHistory.Add("Continuity retry blocked before encoding: "+ex.Message);}Fail(j,ex);}
                 }
                 _manager.SetIncomingStatus("Incoming ON; quiet="+_engine.IncomingQuietSeconds+"s; "+string.Join(" / ",_jobs.GroupBy(j=>j.State).Select(g=>g.Key+"="+g.Count()))+"\n"+
                     string.Join("\n",_observations.Where(o=>o.Value.Error!=null).Select(o=>Path.GetFileName(o.Key)+": "+o.Value.Error).Concat(_jobs.Where(j=>j.State!="Done").Select(j=>j.Name+" ["+j.State+"] "+j.Error)).Take(30)));
@@ -129,13 +137,17 @@ namespace TAS.Server
                 else{j.State="Failed";j.Error="Claim not completed; resend or review Incoming. No source was deleted.";Persist();}return;
             }
             if(j.State=="Encoding" && !_encoding.Contains(j.Id)){j.State="Queued";Persist();}
-            if(j.State=="Queued"){StartIngest(j);return;}
+            if(j.State=="Queued"||j.State=="Failed"&&j.ContinuityRetryPending&&BroadcastContinuityQc.Enabled){StartIngest(j);return;}
             if(j.State=="Ready" || j.State=="Publishing"){Publish(j);return;}
             if(j.State=="Committed"){CleanupAndArchive(j);return;}
         }
         private void StartIngest(IncomingJob j)
         {
             if(_encoding.Count!=0 || Server.FileManager.Current.GetOperationQueue().OfType<IngestOperation>().Any())return;
+            if(BroadcastContinuityQc.Enabled&&BroadcastContinuityQc.Due(j.Name,DateTime.UtcNow)==null){
+                const string waiting="Waiting: no current/future approved VPlay use within72h; retained input, no encoding";
+                if(j.Error!=waiting){j.Error=waiting;Persist();}return;
+            }
             var path=IncomingFiles.Within(Profile.Folder,Path.Combine(Profile.Folder,j.Input));
             using(var f=IncomingFiles.Open(Profile.Folder,path))if(IncomingFiles.Identity(f)!=j.InputIdentity || IncomingFiles.Hash(f)!=j.InputHash)throw new IOException("Managed input changed; retained for review");
             var source=Profile.FindMediaFirst(m=>string.Equals(((MediaBase)m).FullPath,path,StringComparison.OrdinalIgnoreCase)) as IngestMedia;
@@ -146,12 +158,36 @@ namespace TAS.Server
             op.Source=source;op.DestDirectory=work;op.ManagedIncoming=true;op.TryCount=1;op.StartTC=source.TcStart;op.Trim=false;
             op.DestProperties=new PersistentMediaProxy{MediaGuid=j.Id,MediaName=j.Name,FileName=j.Candidate,MediaType=TMediaType.Movie,VideoFormat=TVideoFormat.HD1080i5000,Duration=source.Duration,TcStart=source.TcStart};
             op.AspectConversion=TAspectConversion.NoConversion;op.SourceColorSpace=IngestColorSpace.Auto;
-            j.State="Encoding";j.Error=null;Persist();_encoding.Add(j.Id);
+            j.State="Encoding";j.Error=null;j.ContinuityRetryPending=false;j.QcMode=BroadcastContinuityQc.Enabled?"BroadcastContinuity":"Strict";Persist();_encoding.Add(j.Id);
             op.Finished+=(_,a)=>{lock(_sync){_encoding.Remove(j.Id);if(_disposed)return;
+                j.QcWarnings=op.OperationOutput.Where(line=>line.Contains("Broadcast Continuity QC")).Take(100).ToArray();
                 try{if(op.OperationStatus==FileOperationStatus.Finished){j.CandidateHash=AtomicMediaCopy.Hash(op.Dest.FullPath);j.State="Ready";j.Error=null;}
                 else{j.State="Failed";j.Error="Native Ingest failed; managed input retained. "+string.Join("; ",op.OperationOutput.AsEnumerable().Reverse().Take(2).Reverse());}}
                 catch(Exception ex){j.State="Failed";j.Error="Completed job verification failed; input retained: "+ex.Message;}SafePersist();}};
             Server.FileManager.Current.Queue(op);
+        }
+        private string _retryGeneration;
+        private void ApplyContinuityRetries()
+        {
+            if(!BroadcastContinuityQc.Enabled)return;
+            var path=Path.Combine(BroadcastContinuityQc.Home,"broadcast-continuity-retry.json");if(!File.Exists(path))return;
+            var plan=BroadcastContinuityQc.Read<BroadcastContinuityQc.RetryPlan>(path);
+            if(string.IsNullOrWhiteSpace(plan.Generation)||plan.Jobs==null||_retryGeneration==plan.Generation)return;
+            bool changed=false;
+            foreach(var entry in plan.Jobs){
+                var job=_jobs.SingleOrDefault(j=>j.Id.ToString()==entry.Id);
+                if(job==null||job.ContinuityRetryGeneration==plan.Generation||job.State!="Failed"||job.InputHash!=entry.InputHash||
+                    !BroadcastContinuityQc.SoftFailure(job.Error)||BroadcastContinuityQc.Due(job.Name,DateTime.UtcNow)==null)continue;
+                if(!File.Exists(IncomingFiles.Within(Profile.Folder,Path.Combine(Profile.Folder,job.Input))))continue;
+                if(job.QcHistory==null)job.QcHistory=new List<string>();
+                job.QcHistory.Add(DateTime.UtcNow.ToString("o")+" previous Failed; attempts="+job.Attempts+"; "+job.Error);
+                job.QcHistory.Add("Owner-authorized BroadcastContinuity retry "+plan.Generation+"; same native ID/input hash/target GUID; next air use determines order");
+                // Retain Failed plus a durable retry intent until the actual lane
+                // opens. Twenty future retries must not consume healthy ahead
+                // slots or prevent a nearer new source from being delivered.
+                job.ContinuityRetryGeneration=plan.Generation;job.ContinuityRetryPending=true;job.Retry=0;job.Attempts=0;changed=true;
+            }
+            if(changed)Persist();_retryGeneration=plan.Generation;
         }
         private static string Key(string s)=>(s??"").Normalize(NormalizationForm.FormC).ToUpperInvariant();
         internal static bool MatchesName(string name,string mediaName,string fileName,Guid guid)
@@ -188,6 +224,7 @@ namespace TAS.Server
         }
         private bool CasparStillUses(params string[] paths)
         {
+            if(!paths.Any(p=>!string.IsNullOrEmpty(p)))return false;
             // Covers producers left in CasparCG across a TVPlay restart, including preload.
             // It is read-only AMCP; no consumer/output settings are changed.
             var owner=((CasparServerChannel)_engine.PlayoutChannelPRI).Owner;
@@ -195,7 +232,7 @@ namespace TAS.Server
             foreach(var ch in owner.ChannelsSer){
                 using(var client=new System.Net.Sockets.TcpClient()){
                     var connection=client.BeginConnect(host,port,null,null);if(!connection.AsyncWaitHandle.WaitOne(1000))return true;client.EndConnect(connection);
-                    var stream=client.GetStream();stream.ReadTimeout=1000;var request=Encoding.UTF8.GetBytes("INFO "+ch.Id+"\r\n");stream.Write(request,0,request.Length);
+                    var stream=client.GetStream();stream.ReadTimeout=5000;var request=Encoding.UTF8.GetBytes("INFO "+ch.Id+"\r\n");stream.Write(request,0,request.Length);
                     var data=new StringBuilder();var buffer=new byte[16384];while(data.ToString().IndexOf("</channel>",StringComparison.Ordinal)<0){int n=stream.Read(buffer,0,buffer.Length);if(n==0)return true;data.Append(Encoding.UTF8.GetString(buffer,0,n));if(data.Length>1048576)return true;}
                     var response=data.ToString();int start=response.IndexOf("<?xml",StringComparison.Ordinal);if(start<0)start=response.IndexOf("<channel>",StringComparison.Ordinal);
                     var xml=new System.Xml.XmlDocument();xml.LoadXml(response.Substring(start).Trim());

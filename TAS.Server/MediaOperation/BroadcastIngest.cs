@@ -22,6 +22,7 @@ namespace TAS.Server.MediaOperation
         [DataMember(Name = "width")] public int Width;
         [DataMember(Name = "height")] public int Height;
         [DataMember(Name = "channels")] public int Channels;
+        [DataMember(Name = "channel_layout")] public string ChannelLayout;
         [DataMember(Name = "sample_aspect_ratio")] public string Sar;
         [DataMember(Name = "display_aspect_ratio")] public string Dar;
         [DataMember(Name = "r_frame_rate")] public string Rate;
@@ -137,8 +138,11 @@ namespace TAS.Server.MediaOperation
         internal static string Build(BroadcastProbe info, string source, string destination, TVideoCodec videoCodec,
             TAudioCodec audioCodec, IngestColorSpace inputColor, TFieldOrder fieldOverride,
             TAspectConversion aspect, TAudioChannelMappingConversion mapping, double volume,
-            double start, double? duration, string additional, string timecode, bool broadcastReadyV1 = false)
+            double start, double? duration, string additional, string timecode, bool broadcastReadyV1 = false,
+            bool continuityQc = false, Action<string> warning = null)
         {
+            if(continuityQc&&!broadcastReadyV1)throw new InvalidOperationException("Continuity QC is restricted to Broadcast Ready v1.");
+            Action<string> warn=message=>{if(continuityQc)warning?.Invoke("Broadcast Continuity QC: "+message);};
             if (broadcastReadyV1 && (videoCodec != TVideoCodec.libx264 || audioCodec != TAudioCodec.pcm_s24le || !string.IsNullOrWhiteSpace(additional)))
                 throw new InvalidOperationException("Broadcast Ready v1 fixes AVC High420 12M and PCM24; codec/EncodeParams overrides are not allowed.");
             if (videoCodec != TVideoCodec.mpeg2video && videoCodec != TVideoCodec.libx264)
@@ -150,13 +154,14 @@ namespace TAS.Server.MediaOperation
             var v = info.Streams.First(s => s.Type == "video");
             if (v.Width <= 0 || v.Height <= 0 || v.PixelFormat == null || !v.PixelFormat.StartsWith("yuv", StringComparison.Ordinal))
                 throw new InvalidOperationException("This broadcast profile requires a decoded YUV SDR source.");
-            if (v.Primaries == "bt2020" || v.Transfer == "smpte2084" || v.Transfer == "arib-std-b67")
+            if (v.Primaries == "bt2020" || (v.Matrix??"").StartsWith("bt2020",StringComparison.Ordinal) || (v.Transfer??"").StartsWith("bt2020",StringComparison.Ordinal) || v.Transfer == "smpte2084" || v.Transfer == "arib-std-b67")
                 throw new InvalidOperationException("HDR/BT.2020 requires a separately approved conversion; do not relabel as BT.709.");
             var range = v.Range;
             if (range != "tv" && range != "pc")
             {
-                if (inputColor == IngestColorSpace.Auto) throw new InvalidOperationException("Unknown source range: declare the input color interpretation explicitly.");
-                range = "tv"; // Explicit operator declaration includes limited range if source range is absent.
+                if (inputColor == IngestColorSpace.Auto&&!continuityQc) throw new InvalidOperationException("Unknown source range: declare the input color interpretation explicitly.");
+                range = continuityQc&&v.PixelFormat.StartsWith("yuvj",StringComparison.Ordinal)?"pc":"tv";
+                warn("Unknown source range; assumed "+range+" from pixel format/default limited YUV. Source range is uncertain.");
             }
             string color;
             if (inputColor == IngestColorSpace.Bt709) color = "iall=bt709";
@@ -164,14 +169,22 @@ namespace TAS.Server.MediaOperation
             else if (v.Primaries == "bt709" && v.Transfer == "bt709" && v.Matrix == "bt709") color = "iall=bt709";
             else if (v.Primaries == "bt470bg" && v.Transfer == "bt709" && v.Matrix == "bt470bg")
                 color = "iprimaries=bt470bg:itrc=bt709:ispace=bt470bg";
-            else throw new InvalidOperationException("Unknown/unsupported SDR source color tags: declare BT.709 or BT.601-625 after checking provenance.");
+            else if(continuityQc){
+                var sdr=new[]{null,"","unknown","unspecified","reserved","bt709","bt470bg","bt470m","smpte170m","smpte240m","gamma22","gamma28","iec61966-2-1"};
+                if(!sdr.Contains(v.Primaries)||!sdr.Contains(v.Transfer)||!sdr.Contains(v.Matrix))throw new InvalidOperationException("Explicit non-SDR/unsupported colour tags require separate conversion approval.");
+                color=v.Height>=720||v.Width>=1280?"iall=bt709":v.Height<=480?"iall=bt601-6-525":"iall=bt601-6-625";
+                warn("Missing/ambiguous SDR tags; resolution fallback "+color+". This is an assumption, not verified source colour metadata.");
+            }else throw new InvalidOperationException("Unknown/unsupported SDR source color tags: declare BT.709 or BT.601-625 after checking provenance.");
 
             var rate = Ratio(v.AverageRate, Ratio(v.Rate));
-            if (rate <= 0) throw new InvalidOperationException("Source frame rate is unknown.");
+            if (rate <= 0&&!continuityQc) throw new InvalidOperationException("Source frame rate is unknown.");
+            if(rate<=0)warn("Unknown nominal frame rate; convert decoded timestamp cadence to50 fields/s.");
             var interlaced = v.FieldOrder == "tt" || v.FieldOrder == "bb" || v.FieldOrder == "tb" || v.FieldOrder == "bt";
             if (fieldOverride != TFieldOrder.Unknown) interlaced = fieldOverride != TFieldOrder.Progressive;
-            if (interlaced && Math.Abs(rate - 25) > 0.02)
+            bool cadenceConvert=interlaced&&Math.Abs(rate-25)>0.02&&continuityQc;
+            if (interlaced && Math.Abs(rate - 25) > 0.02&&!continuityQc)
                 throw new InvalidOperationException("Interlaced sources in this profile must have 25 frames / 50 fields per second.");
+            if(cadenceConvert)warn("Non25fps interlaced source: decode both fields with yadif send_field, convert to50p and reassemble1080i50 TFF.");
             var sourceDar = Ratio(v.Dar, v.Width * Ratio(v.Sar, 1) / v.Height);
             if (aspect == TAspectConversion.Force4_3) sourceDar = 4.0 / 3;
             else if (aspect == TAspectConversion.Force16_9) sourceDar = 16.0 / 9;
@@ -190,10 +203,11 @@ namespace TAS.Server.MediaOperation
             vf.Add("setpts=PTS-" + N(start) + "/TB");
             if (fieldOverride != TFieldOrder.Unknown)
                 vf.Add("setfield=" + (fieldOverride == TFieldOrder.TFF ? "tff" : fieldOverride == TFieldOrder.BFF ? "bff" : "prog"));
-            if (interlaced) vf.AddRange(new[] { "fieldorder=tff", "fps=25:start_time=0" });
+            if(cadenceConvert){vf.Add("yadif=mode=send_field:parity=auto:deint=all");vf.Add("fps=50:start_time=0");interlaced=false;}
+            else if (interlaced) vf.AddRange(new[] { "fieldorder=tff", "fps=25:start_time=0" });
             else
             {
-                if (rate <= 25.02) vf.Add("fps=25:start_time=0");
+                if (rate > 0 && rate <= 25.02) vf.Add("fps=25:start_time=0");
                 vf.Add("fps=50:start_time=0");
             }
             vf.Add("scale=" + width + ":" + height + ":interl=" + (interlaced ? "1" : "0") + ":in_range=" + range + ":out_range=" + range + ":flags=lanczos+accurate_rnd");
@@ -210,6 +224,7 @@ namespace TAS.Server.MediaOperation
             var audio = info.Streams.FirstOrDefault(s => s.Type == "audio");
             if (audio == null)
             {
+                if(broadcastReadyV1)throw new InvalidOperationException("Broadcast Ready v1 requires source audio; missing necessary audio is blocking.");
                 var length = duration ?? Number(info.Format?.Duration);
                 if (length <= 0) throw new InvalidOperationException("Silent source duration is unknown.");
                 graph += "anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration=" + N(length) + "[a]";
@@ -217,15 +232,18 @@ namespace TAS.Server.MediaOperation
             else
             {
                 if (audio.Channels <= 0) throw new InvalidOperationException("Audio channel count is unknown.");
-                if (broadcastReadyV1 && audio.Channels > 2 && (mapping == TAudioChannelMappingConversion.Default || mapping == TAudioChannelMappingConversion.FirstTwoChannels))
+                bool downmix=continuityQc&&audio.Channels>2&&!string.IsNullOrWhiteSpace(audio.ChannelLayout)&&audio.ChannelLayout!="unknown"&&
+                    (mapping==TAudioChannelMappingConversion.Default||mapping==TAudioChannelMappingConversion.FirstTwoChannels);
+                if (broadcastReadyV1 && audio.Channels > 2 && !downmix&&(mapping == TAudioChannelMappingConversion.Default || mapping == TAudioChannelMappingConversion.FirstTwoChannels))
                     throw new InvalidOperationException("Multichannel sources require an explicitly reviewed stereo selection/downmix; do not discard centre dialogue automatically.");
                 if (mapping == TAudioChannelMappingConversion.MergeAllChannels)
                     throw new InvalidOperationException("1080i50 requires a stereo channel selection, not MergeAllChannels.");
                 var pan = MediaConversion.AudioChannelMapingConversions[mapping].FFMpegFilter;
                 if (mapping == TAudioChannelMappingConversion.Default || mapping == TAudioChannelMappingConversion.FirstTwoChannels)
                     pan = audio.Channels == 1 ? "pan=stereo|c0=c0|c1=c0" : "pan=stereo|c0=c0|c1=c1";
+                if(downmix){pan="aformat=channel_layouts=stereo";warn("Standard FFmpeg stereo downmix of declared "+audio.ChannelLayout+"; no automatic first-two-channel dialogue loss.");}
                 if (string.IsNullOrWhiteSpace(pan)) throw new InvalidOperationException("Unsupported stereo mapping.");
-                var required = Regex.Matches(pan, @"c(\d+)").Cast<Match>().Max(m => int.Parse(m.Groups[1].Value, Inv));
+                var required = downmix?0:Regex.Matches(pan, @"c(\d+)").Cast<Match>().Max(m => int.Parse(m.Groups[1].Value, Inv));
                 if (required >= audio.Channels && !(audio.Channels == 1 && pan.EndsWith("c1=c0", StringComparison.Ordinal)))
                     throw new InvalidOperationException("Requested audio channels are absent from the first audio stream.");
                 graph += "[0:" + audio.Index + "]asetpts=PTS-" + N(origin) + "/TB";

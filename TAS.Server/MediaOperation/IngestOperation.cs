@@ -425,6 +425,11 @@ namespace TAS.Server.MediaOperation
             if (ingestDirectory.BroadcastReadyV1 && string.Equals(Path.GetFullPath(localSourceMedia.FullPath), Path.GetFullPath(destMedia.FullPath), StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Broadcast Ready v1 never overwrites its source.");
             var broadcast = destMedia.VideoFormat == TVideoFormat.HD1080i5000 && ingestDirectory.VideoCodec != TVideoCodec.copy;
+            var continuity=ManagedIncoming&&ingestDirectory.BroadcastReadyV1&&BroadcastContinuityQc.Enabled;
+            if(continuity){
+                AddWarningMessage("Broadcast Continuity QC enabled on experimental AIR-02; output BRv1/full decode/integrity remain mandatory.");
+                AddWarningMessage("Broadcast Continuity QC: loudness deviations are advisory; existing gain is retained, no loudness compliance is asserted.");
+            }
             string Params;
             if (broadcast)
             {
@@ -438,7 +443,8 @@ namespace TAS.Server.MediaOperation
                     AspectConversion, AudioChannelMappingConversion, AudioVolume,
                     IsTrimmed() ? (StartTC - Source.TcStart).TotalSeconds : 0,
                     IsTrimmed() ? (double?)Duration.TotalSeconds : null, ingestDirectory.EncodeParams,
-                    StartTC.ToSmpteTimecodeString(destMedia.FrameRate()), ingestDirectory.BroadcastReadyV1);
+                    continuity&&!IsTrimmed()?"00:00:00:00":StartTC.ToSmpteTimecodeString(destMedia.FrameRate()), ingestDirectory.BroadcastReadyV1,continuity,AddWarningMessage);
+                if(continuity&&!IsTrimmed()&&StartTC!=TimeSpan.Zero)AddWarningMessage("Broadcast Continuity QC: source timecode retained in source metadata; output address normalized to zero, content timing unchanged.");
             }
             else
             {
@@ -471,7 +477,10 @@ namespace TAS.Server.MediaOperation
                 if (broadcast)
                     (destMedia as PersistentMedia)?.Save();
                 ((MediaDirectoryBase)DestDirectory).RefreshVolumeInfo();
-                if (Math.Abs(destMedia.Duration.Ticks - (IsTrimmed() ? Duration.Ticks : localSourceMedia.Duration.Ticks)) > TimeSpan.TicksPerSecond / 2)
+                var expectedDuration=IsTrimmed()?Duration.TotalSeconds:localSourceMedia.Duration.TotalSeconds;
+                if(continuity&&Math.Abs(destMedia.Duration.TotalSeconds-expectedDuration)>0.04&&BroadcastContinuityQc.DurationAllowed(expectedDuration,destMedia.Duration.TotalSeconds,true))
+                    AddWarningMessage("Broadcast Continuity QC: minor fully decoded duration discrepancy; expected="+expectedDuration.ToString(CultureInfo.InvariantCulture)+"s, actual="+destMedia.Duration.TotalSeconds.ToString(CultureInfo.InvariantCulture)+"s.");
+                if (!BroadcastContinuityQc.DurationAllowed(expectedDuration,destMedia.Duration.TotalSeconds,continuity))
                 {
                     destMedia.MediaStatus = TMediaStatus.CopyError;
                     (destMedia as PersistentMedia)?.Save();

@@ -107,6 +107,37 @@ internal static class Program
             Reject(() => ready(Input(), "", TVideoCodec.libx264, TAudioCodec.aac), "Ready v1 non-PCM24");
             var surround = Input(); surround.Streams[1].Channels = 6;
             Reject(() => ready(surround, "", TVideoCodec.libx264, TAudioCodec.pcm_s24le), "Ready v1 multichannel default selection");
+            Func<BroadcastProbe,System.Collections.Generic.List<string>,string> continuity=(probe,emitted)=>
+                BroadcastIngest.Build(probe,"D:\\in.mov","D:\\out.mov",TVideoCodec.libx264,TAudioCodec.pcm_s24le,IngestColorSpace.Auto,
+                    TFieldOrder.Unknown,TAspectConversion.NoConversion,TAudioChannelMappingConversion.FirstTwoChannels,0,0,null,"","00:00:00:00",true,true,emitted.Add);
+            var warnings=new System.Collections.Generic.List<string>();
+            var uncertain=Input();uncertain.Streams[0].Range=null;uncertain.Streams[0].Primaries=null;uncertain.Streams[0].Matrix=null;uncertain.Streams[0].Transfer=null;
+            var fallback=continuity(uncertain,warnings);
+            Check(fallback.Contains("colorspace=iall=bt709")&&fallback.Contains("in_range=tv")&&warnings.Count==2,"continuity HD709/limited assumptions are explicitly warned");
+            uncertain.Streams[0].Height=576;uncertain.Streams[0].Width=720;
+            Check(continuity(uncertain,warnings).Contains("iall=bt601-6-625"),"continuity SD576 uses documented625 fallback");
+            uncertain.Streams[0].Height=480;
+            Check(continuity(uncertain,warnings).Contains("iall=bt601-6-525"),"continuity SD480 uses documented525 fallback");
+            uncertain.Streams[0].PixelFormat="yuvj420p";
+            Check(continuity(uncertain,warnings).Contains("in_range=pc"),"explicit JPEG pixel family selects full range fallback");
+            uncertain.Streams[0].Range="pc";
+            Check(continuity(uncertain,warnings).Contains("irange=pc"),"known full range is retained");
+            Reject(()=>continuity(hdr,warnings),"continuity never guesses HDR as SDR");
+            var wide=Input();wide.Streams[0].Matrix="bt2020nc";Reject(()=>continuity(wide,warnings),"explicit wide-gamut matrix remains blocking");
+            var unknownTransfer=Input();unknownTransfer.Streams[0].Transfer="smpte428";Reject(()=>continuity(unknownTransfer,warnings),"unapproved cinema transfer remains blocking");
+            Check(continuity(Input("30000/1001","tt"),warnings).Contains("yadif=mode=send_field")&&continuity(Input("30000/1001","tt"),warnings).Contains("interlace=scan=tff"),"non25 interlace is field decoded and reassembled50i");
+            Check(continuity(Input("0/0"),warnings).Contains("fps=50")&&!continuity(Input("0/0"),warnings).Contains("fps=25"),"unknown nominal rate uses decoded cadence without25p drop");
+            Reject(()=>continuity(silent,warnings),"continuity missing required audio is blocking");
+            Reject(()=>ready(silent,"",TVideoCodec.libx264,TAudioCodec.pcm_s24le),"Strict Ready v1 missing audio is also blocking");
+            Reject(()=>continuity(surround,warnings),"unknown multichannel layout remains blocking");
+            surround.Streams[1].ChannelLayout="5.1";
+            Check(continuity(surround,warnings).Contains("aformat=channel_layouts=stereo"),"declared surround uses centre-preserving standard downmix");
+            Check(BroadcastContinuityQc.HostAllows("BroadcastContinuity","AIR-02","AIR-02")&&!BroadcastContinuityQc.HostAllows("BroadcastContinuity","AIR-02","PRODUCTION"),"policy is restricted to experimental AIR-02");
+            Check(!BroadcastContinuityQc.HostAllows("Strict","AIR-02","AIR-02"),"Strict rollback disables all continuity assumptions");
+            Check(BroadcastContinuityQc.DurationAllowed(1800,1801,true)&&!BroadcastContinuityQc.DurationAllowed(1800,1801,false),"small fully decoded overrun can warn only in continuity");
+            Check(!BroadcastContinuityQc.DurationAllowed(1800,1799,true)&&!BroadcastContinuityQc.DurationAllowed(1800,1803,true),"short output and large overrun remain blocking");
+            Check(!BroadcastContinuityQc.DurationAllowed(0,1,true)&&!BroadcastContinuityQc.DurationAllowed(10,double.NaN,true),"unknown or nonfinite duration remains blocking");
+            Check(BroadcastContinuityQc.SoftFailure("Unknown source range: declare the input color interpretation explicitly.")&&!BroadcastContinuityQc.SoftFailure("Unknown source range; decode failed"),"retry allows soft criterion and rejects combined technical failure");
             Console.WriteLine("ALL " + checks + " CHECKS PASS"); return 0;
         }
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }
