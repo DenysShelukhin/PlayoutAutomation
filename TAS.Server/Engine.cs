@@ -481,6 +481,14 @@ namespace TAS.Server
         }
 
         public bool AbsoluteScheduleEnabled { get; set; }
+        public void PrepareAbsolute(IEvent source)
+        {
+            if(!HaveRight(EngineRight.Play)||!(source is Event ev)||ev.EventType!=TEventType.Movie||ev.Media==null||ev.Media.MediaStatus!=TMediaStatus.Available||!ev.Media.FileExists()||!PlayoutCacheRules.Ready(ev.Media))return;
+            lock(RundownSync){
+                if(_playoutChannelPRI!=null&&!_playoutChannelPRI.IsPreparedAbsolute(ev))_playoutChannelPRI.LoadNext(ev);
+                if(_playoutChannelSEC!=null&&!_playoutChannelSEC.IsPreparedAbsolute(ev))_playoutChannelSEC.LoadNext(ev);
+            }
+        }
         // Local schedule controller: preserve source UTC anchor and native frame seek.
         public void StartAbsolute(IEvent source, DateTime anchor)
         {
@@ -494,7 +502,12 @@ namespace TAS.Server
                 ev.InternalSetPlaying(anchor, elapsed.Ticks / FrameTicks);
                 _run(ev); SetVisibleEvent(ev); _setPlaying(ev);
                 EngineState = TEngineState.Running;
-                _refreshVisibleEventOnPlayer(ev, true); ev.Save();
+                if(elapsed<TimeSpan.FromMilliseconds(500)&&_playoutChannelPRI!=null&&_playoutChannelPRI.IsPreparedAbsolute(ev)){
+                    _setProgramAudioVolume(ev.GetAudioVolumeLinearValue(),false);
+                    _playoutChannelPRI.Play(ev);_playoutChannelSEC?.Play(ev);
+                    if(CGElementsController!=null){CGElementsController.Clear();CGElementsController.SetState(ev);}
+                }else _refreshVisibleEventOnPlayer(ev, true);
+                ev.Save();
             }
         }
 

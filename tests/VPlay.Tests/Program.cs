@@ -73,6 +73,24 @@ static class Program
         check(!TAS.Server.PlayoutCacheRules.InWindow(now,now.AddHours(1),73),"unapproved horizon rejected");
         check(!TAS.Server.PlayoutCacheRules.InWindow(now.AddDays(4),now.AddHours(1),72),"moving air clock expires prior-window demand");
     }
+    static void BoundedOverrides()
+    {
+        var method=typeof(TAS.Client.VPlayMigration.Plugin).GetMethod("FileOverrideSourceAllowed",BindingFlags.Static|BindingFlags.NonPublic);
+        var source=JObject.Parse("{Sequence:1,ItemId:'item',AssetKey:'asset',XmlSha256:'xml',Kind:'File',ItemType:'1',EventType:'2',DurationTicks:40000000,TimeCodeInTicks:0,StartTimecodeTicks:0,OutOffsetTicks:40000000,ClipDurationTicks:40000000,OriginalAttributes:{LogoIndex:'0'},Issues:['EventType requires semantics review']}");
+        source["AudioXml"]="<AudioConfig Matrix_0='1' Matrix_1='1' Gain_0='1' Gain_1='1'/>";
+        var approval=JObject.Parse("{Approved:true,Sequence:1,ItemId:'item',AssetKey:'asset',XmlSha256:'xml',DurationTicks:40000000,BeginUtcTicks:100}");
+        Action<JObject,JObject,bool,string> check=(s,approved,expected,label)=>{if((bool)method.Invoke(null,new object[]{s,approved,100L})!=expected)throw new Exception(label);checks++;Console.WriteLine("PASS "+label);};
+        check(source,approval,true,"exact bounded file-only approval accepted");
+        var n=(JObject)source.DeepClone();n["TimeCodeInTicks"]=400000;check(n,approval,false,"nonzero trim cannot bypass review");
+        n=(JObject)source.DeepClone();n["Issues"]=new JArray("Unknown colour");check(n,approval,false,"technical QC warning cannot bypass review");
+        n=(JObject)source.DeepClone();n["ClipDurationTicks"]=null;check(n,approval,false,"unknown source duration refused");
+        n=(JObject)source.DeepClone();n["EventType"]="3";check(n,approval,false,"live or other special semantics refused");
+        n=(JObject)source.DeepClone();n["AudioXml"]="<AudioConfig Matrix_0='0' Matrix_1='1' Gain_0='1' Gain_1='1'/>";check(n,approval,false,"nondefault audio routing refused");
+        n=(JObject)source.DeepClone();n["OriginalAttributes"]["LogoIndex"]="1";check(n,approval,false,"unresolved logo action refused");
+        var a=(JObject)approval.DeepClone();a["BeginUtcTicks"]=101;check(source,a,false,"approval cannot rebase original anchor");
+        a=(JObject)approval.DeepClone();a["AssetKey"]="other";check(source,a,false,"approval cannot transfer to another file");
+        a=(JObject)approval.DeepClone();a["Approved"]=false;check(source,a,false,"unapproved qualification cannot play");
+    }
     static void Check(JObject node, bool rejected, string label)
     {
         bool failed = false;
@@ -93,7 +111,7 @@ static class Program
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["IdAux"] = ""; Check(n, true, "Missing trace identity rejected");
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["SubEvents"] = null; Check(n, true, "Missing explicit leaf array rejected");
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["Duration"] = "-00:00:01"; Check(n, true, "Negative duration rejected");
-            Persistence(); CacheRules(); Console.WriteLine(checks + " checks passed"); return 0;
+            Persistence(); CacheRules(); BoundedOverrides(); Console.WriteLine(checks + " checks passed"); return 0;
         } catch (Exception e) { Console.Error.WriteLine(e); return 1; }
     }
 }

@@ -370,6 +370,8 @@ namespace TAS.Server
             return false;
         }
 
+        internal bool IsPreparedAbsolute(Event ev)=>_loadedNext.TryGetValue(ev.Layer,out var next)&&next==ev;
+
         internal void RefreshPlayback(Event ev, bool start)
         {
             lock (IncomingMediaGate.Sync) {

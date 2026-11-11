@@ -41,21 +41,30 @@ namespace TAS.Client.VPlayMigration
                 }
                 var now=engine.CurrentTime;var slot=_absoluteSources.FirstOrDefault(s=>s.Begin<=now&&s.End>now);
                 engine.AbsoluteScheduleEnabled=true;
+                // Warm the next immediate Ready producer before its air anchor;
+                // keep the current foreground/filler running until the boundary.
+                var upcoming=_absoluteSources.FirstOrDefault(s=>s.Begin>now);
+                if(upcoming!=null&&upcoming.Begin-now<TimeSpan.FromSeconds(30)){
+                    var next=(string)upcoming.Source["ParseStatus"]=="Pending"?upcoming.Event:ResolveFileOverride(upcoming);
+                    if(next!=null&&next.EventType==TEventType.Movie&&Ready(next.Media))engine.PrepareAbsolute(next);
+                }
                 string mode,reason;int sequence=0;double offset=0;
                 if(slot==null){mode="Outside XML dates / waiting";reason="No historical event is started as current";}
                 else {
                     sequence=(int)slot.Source["Sequence"];offset=(now-slot.Begin).TotalSeconds;
-                    var supported=(string)slot.Source["ParseStatus"]=="Pending"&&slot.Event.EventType==TEventType.Movie;
-                    if(supported&&slot.Event.MediaGuid==Guid.Empty){
+                    var approved=ResolveFileOverride(slot);var playable=approved??slot.Event;
+                    var supported=approved!=null||((string)slot.Source["ParseStatus"]=="Pending"&&slot.Event.EventType==TEventType.Movie);
+                    if(supported&&playable.MediaGuid==Guid.Empty){
                         var catalog=JArray.Parse(File.ReadAllText(Path.Combine(Home,"catalog.json")));
                         var asset=catalog.FirstOrDefault(a=>(string)a["Key"]==(string)slot.Source["AssetKey"]);
                         var media=Engine.MediaManager.MediaDirectoryPRI.GetAllFiles().Where(m=>m.MediaName==(string)asset?["LogicalName"]).ToArray();
-                        if(media.Length==1){slot.Event.MediaGuid=media[0].MediaGuid;slot.Event.Save();}
+                        if(media.Length==1){playable.MediaGuid=media[0].MediaGuid;playable.Save();}
                     }
-                    if(supported&&slot.Event.Media!=null)TAS.Server.PlayoutCacheRules.Request(slot.Event.Media);
-                    if(supported&&Ready(slot.Event.Media)){
-                        mode="Scheduled media";reason="Original UTC anchor; native frame offset";
-                        if(engine.Playing!=slot.Event&&slot.End-now>TimeSpan.FromMilliseconds(250))engine.StartAbsolute(slot.Event,slot.Begin);
+                    if(supported&&playable.Media!=null)TAS.Server.PlayoutCacheRules.Request(playable.Media);
+                    if(supported&&Ready(playable.Media)){
+                        mode="Scheduled media";reason=approved==null?"Original UTC anchor; native frame offset":"Bounded file-only override; full native technical proof";
+                        if(engine.Playing!=playable&&slot.End-now>TimeSpan.FromMilliseconds(250))engine.StartAbsolute(playable,slot.Begin);
+                        if(approved!=null&&engine.Playing==playable)RecordFileOverride(slot,playable);
                     } else {
                         mode="Diagnostic filler";reason=supported?"Missing / Not Ready":"Special Event / Requires Review";
                         if(_diagnosticFiller!=null&&Ready(_diagnosticFiller.Media)){
