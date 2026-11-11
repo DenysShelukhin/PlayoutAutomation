@@ -65,6 +65,7 @@ namespace TAS.Client.VPlayMigration
                         mode="Scheduled media";reason=approved==null?"Original UTC anchor; native frame offset":"Bounded file-only override; full native technical proof";
                         if(engine.Playing!=playable&&slot.End-now>TimeSpan.FromMilliseconds(250))engine.StartAbsolute(playable,slot.Begin);
                         if(approved!=null&&engine.Playing==playable)RecordFileOverride(slot,playable);
+                        if(engine.Playing==playable)CheckPhysicalClock(playable,slot.Begin,slot.End);
                     } else {
                         mode="Diagnostic filler";reason=supported?"Missing / Not Ready":"Special Event / Requires Review";
                         if(_diagnosticFiller!=null&&Ready(_diagnosticFiller.Media)){

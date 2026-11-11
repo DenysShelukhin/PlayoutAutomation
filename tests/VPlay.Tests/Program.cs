@@ -91,6 +91,19 @@ static class Program
         a=(JObject)approval.DeepClone();a["AssetKey"]="other";check(source,a,false,"approval cannot transfer to another file");
         a=(JObject)approval.DeepClone();a["Approved"]=false;check(source,a,false,"unapproved qualification cannot play");
     }
+    static void AbsoluteBackground()
+    {
+        var method=typeof(TAS.Server.CasparServerChannel).GetMethod("PreserveDiagnosticBackground",BindingFlags.Static|BindingFlags.NonPublic);
+        for(int changed=-1;changed<5;changed++){
+            var flags=new object[]{true,true,true,true,true};if(changed>=0)flags[changed]=false;
+            bool preserve=(bool)method.Invoke(null,flags);
+            if(preserve!=(changed<0))throw new Exception("Diagnostic background protection scope "+changed);
+            checks++;Console.WriteLine("PASS absolute diagnostic protection scope "+changed);
+        }
+        var drift=typeof(TAS.Server.Engine).GetMethod("AbsoluteDriftNeedsCorrection",BindingFlags.Static|BindingFlags.NonPublic);
+        var cases=new[]{new long[]{0,50,1933,1},new long[]{49,50,1933,0},new long[]{2147483647,50,1933,0},new long[]{100,50,1933,1},new long[]{0,-1,1933,0},new long[]{0,1933,1933,0},new long[]{0,1,0,0}};
+        foreach(var c in cases){if((bool)drift.Invoke(null,new object[]{c[0],c[1],c[2]})!=(c[3]==1))throw new Exception("Physical drift bounds");checks++;Console.WriteLine("PASS physical foreground drift bounds "+c[0]+"/"+c[1]);}
+    }
     static void Check(JObject node, bool rejected, string label)
     {
         bool failed = false;
@@ -111,7 +124,7 @@ static class Program
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["IdAux"] = ""; Check(n, true, "Missing trace identity rejected");
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["SubEvents"] = null; Check(n, true, "Missing explicit leaf array rejected");
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["Duration"] = "-00:00:01"; Check(n, true, "Negative duration rejected");
-            Persistence(); CacheRules(); BoundedOverrides(); Console.WriteLine(checks + " checks passed"); return 0;
+            Persistence(); CacheRules(); BoundedOverrides(); AbsoluteBackground(); Console.WriteLine(checks + " checks passed"); return 0;
         } catch (Exception e) { Console.Error.WriteLine(e); return 1; }
     }
 }

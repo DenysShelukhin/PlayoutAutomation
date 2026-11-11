@@ -44,6 +44,7 @@ namespace TAS.Server
 
         [DtoMember, Hibernate]
         public int Id { get; set; }
+        public string PhysicalClockServerAddress=>Owner.ServerAddress;
 
         [DtoMember, Hibernate]
         public string ChannelName { get; set; }
@@ -83,6 +84,7 @@ namespace TAS.Server
             var channel = _casparChannel;
             if (aEvent != null && CheckConnected(channel))
             {
+                if(KeepAbsoluteBackground(aEvent))return true;
                 if (aEvent.IsVisibleEvent())
                 {
                     var item = _getItem(aEvent);
@@ -231,9 +233,14 @@ namespace TAS.Server
             var channel = _casparChannel;
             if (CheckConnected(channel))
             {
+                // A diagnostic loop must not promote an upcoming absolute item.
+                // Keep its current diagnostic image (including EOF hold) until
+                // the controller reaches the real item's original air anchor.
+                if(KeepAbsoluteBackground(aEvent))return true;
                 if (aEvent.IsVisibleEvent())
                 {
-                    if (!(_visible.TryGetValue(aEvent.Layer, out var visible) && visible == aEvent))
+                    if (!(_visible.TryGetValue(aEvent.Layer, out var visible) && visible == aEvent) ||
+                        ((aEvent.Engine as Engine)?.AbsoluteScheduleEnabled==true&&_loadedNext.TryGetValue(aEvent.Layer,out var differentBackground)&&differentBackground!=aEvent))
                     {
                         if (!(_loadedNext.TryGetValue(aEvent.Layer, out var loaded) && loaded == aEvent))
                         {
@@ -370,7 +377,19 @@ namespace TAS.Server
             return false;
         }
 
+        internal static bool PreserveDiagnosticBackground(bool absolute,bool diagnostic,bool looping,bool sameVisible,bool otherBackground)
+            =>absolute&&diagnostic&&looping&&sameVisible&&otherBackground;
+        private bool KeepAbsoluteBackground(Event ev)=>PreserveDiagnosticBackground((ev.Engine as Engine)?.AbsoluteScheduleEnabled==true,
+            ev.EventType==TEventType.Movie&&(ev.IdAux??"").StartsWith("VP26T:",StringComparison.Ordinal)&&(ev.EventName??"").StartsWith("ID_",StringComparison.OrdinalIgnoreCase),ev.IsLoop,
+            _visible.TryGetValue(ev.Layer,out var visible)&&visible==ev,_loadedNext.TryGetValue(ev.Layer,out var background)&&background!=ev);
         internal bool IsPreparedAbsolute(Event ev)=>_loadedNext.TryGetValue(ev.Layer,out var next)&&next==ev;
+        internal bool SeekAbsolute(Event ev,long frame)
+        {
+            lock(IncomingMediaGate.Sync){
+                if(frame<0||frame>uint.MaxValue||!CheckConnected(_casparChannel)||!_visible.TryGetValue(ev.Layer,out var visible)||visible!=ev)return false;
+                _casparChannel.Seek((int)ev.Layer,(uint)frame);return true;
+            }
+        }
 
         internal void RefreshPlayback(Event ev, bool start)
         {

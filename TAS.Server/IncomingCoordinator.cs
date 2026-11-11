@@ -160,7 +160,7 @@ namespace TAS.Server
             op.AspectConversion=TAspectConversion.NoConversion;op.SourceColorSpace=IngestColorSpace.Auto;
             j.State="Encoding";j.Error=null;j.ContinuityRetryPending=false;j.QcMode=BroadcastContinuityQc.Enabled?"BroadcastContinuity":"Strict";Persist();_encoding.Add(j.Id);
             op.Finished+=(_,a)=>{lock(_sync){_encoding.Remove(j.Id);if(_disposed)return;
-                j.QcWarnings=op.OperationOutput.Where(line=>line.Contains("Broadcast Continuity QC")).Take(100).ToArray();
+                j.QcWarnings=op.OperationWarning.Where(line=>line.Contains("Broadcast Continuity QC")).Take(100).ToArray();
                 try{if(op.OperationStatus==FileOperationStatus.Finished){j.CandidateHash=AtomicMediaCopy.Hash(op.Dest.FullPath);j.State="Ready";j.Error=null;}
                 else{j.State="Failed";j.Error="Native Ingest failed; managed input retained. "+string.Join("; ",op.OperationOutput.AsEnumerable().Reverse().Take(2).Reverse());}}
                 catch(Exception ex){j.State="Failed";j.Error="Completed job verification failed; input retained: "+ex.Message;}SafePersist();}};

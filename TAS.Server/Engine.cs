@@ -481,6 +481,24 @@ namespace TAS.Server
         }
 
         public bool AbsoluteScheduleEnabled { get; set; }
+        internal static bool AbsoluteDriftNeedsCorrection(long observed,long wanted,long maximum)
+            =>observed>=0&&observed<maximum&&wanted>=0&&wanted<maximum&&Math.Abs(wanted-observed)>12;
+        public long? CorrectAbsolutePosition(IEvent source,DateTime anchor,long observed,DateTime sampledAt)
+        {
+            if(!HaveRight(EngineRight.Play)||!AbsoluteScheduleEnabled||!(source is Event ev))return null;
+            lock(RundownSync){
+                var now=CurrentTime;
+                if(Playing!=ev||ev.EventType!=TEventType.Movie||ev.Media==null||!PlayoutCacheRules.Ready(ev.Media)||
+                    now<anchor||now>=anchor+ev.Duration-TimeSpan.FromSeconds(1)||DateTime.UtcNow-sampledAt>TimeSpan.FromSeconds(1))return null;
+                long maximum=ev.Media.Duration.Ticks/FrameTicks;
+                long wanted=(now-anchor).Ticks/FrameTicks+(ev.ScheduledTc.Ticks-ev.Media.TcPlay.Ticks)/FrameTicks;
+                if(!AbsoluteDriftNeedsCorrection(observed,wanted,maximum))return null;
+                if(_playoutChannelPRI==null||!_playoutChannelPRI.SeekAbsolute(ev,wanted))return null;
+                _playoutChannelSEC?.SeekAbsolute(ev,wanted);
+                Logger.Warn("Absolute physical clock catch-up event {0}: observed {1}, requested {2}, original anchor {3:o}",ev.Id,observed,wanted,anchor);
+                return wanted;
+            }
+        }
         public void PrepareAbsolute(IEvent source)
         {
             if(!HaveRight(EngineRight.Play)||!(source is Event ev)||ev.EventType!=TEventType.Movie||ev.Media==null||ev.Media.MediaStatus!=TMediaStatus.Available||!ev.Media.FileExists()||!PlayoutCacheRules.Ready(ev.Media))return;
@@ -1392,6 +1410,9 @@ namespace TAS.Server
                 return result;
             if (playingEvent == null)
                 return null;
+            // Bounded absolute references live under a preparation root. Never
+            // use that root's manual siblings as the editorial air successor.
+            if(AbsoluteScheduleEnabled&&(playingEvent.IdAux??"").StartsWith("VP26O:",StringComparison.Ordinal))return null;
             result = (playingEvent.IsLoop ? playingEvent : playingEvent.InternalGetSuccessor()) ?? playingEvent.GetVisualRootTrack().FirstOrDefault(e => e.IsLoop) as Event;
             if (AbsoluteScheduleEnabled && (playingEvent.IdAux ?? "").StartsWith("VP26E:")) {
                 if (result == null || result.EventType != TEventType.Movie || !(result.IdAux ?? "").StartsWith("VP26E:") || !PlayoutCacheRules.Ready(result.Media)
