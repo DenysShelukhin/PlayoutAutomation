@@ -24,7 +24,10 @@ namespace TAS.Client.VPlayMigration
             _physicalAt=now;
             var engine=Engine as TAS.Server.Engine;var channel=engine?.PlayoutChannelPRI as TAS.Server.CasparServerChannel;
             if(channel==null){Interlocked.Exchange(ref _physicalBusy,0);return;}
+            var principal=Thread.CurrentPrincipal;
             Task.Run(()=>{
+                var previousPrincipal=Thread.CurrentPrincipal;
+                Thread.CurrentPrincipal=principal;
                 try{
                     var endpoint=channel.PhysicalClockServerAddress.Split(':');
                     if(endpoint[0]!="127.0.0.1"&&endpoint[0]!="localhost")return;
@@ -56,11 +59,12 @@ namespace TAS.Client.VPlayMigration
                         if(requested.HasValue||repaired)_physicalCorrected=DateTime.UtcNow;
                     }
                     var report=new{Utc=sampledAt,EventId=ev.Id,MediaGuid=ev.MediaGuid,AnchorUtc=anchor,EndUtc=end,ActualFile=actualPath,ExpectedFile=expected,Matched=matched,
-                        ActualFrame=actual,ExpectedOffsetSeconds=(sampledAt-anchor).TotalSeconds,QuerySeconds=(sampledAt-requestAt).TotalSeconds,RequestedFrame=requested,RepairedForeground=repaired};
+                        ActualFrame=actual,ExpectedOffsetSeconds=(sampledAt-anchor).TotalSeconds,QuerySeconds=(sampledAt-requestAt).TotalSeconds,RequestedFrame=requested,RepairedForeground=repaired,
+                        CanPlay=engine.HaveRight(TAS.Common.EngineRight.Play),EnginePlayingId=engine.Playing?.Id,EngineUtc=engine.CurrentTime,MediaDurationTicks=ev.Media?.Duration.Ticks};
                     Save("absolute-physical-status.json",report);
                     if(requested.HasValue||repaired)File.AppendAllText(Path.Combine(Home,"absolute-physical-corrections.jsonl"),JsonConvert.SerializeObject(report)+Environment.NewLine);
                 }catch(Exception ex){Save("absolute-physical-error.json",new{Utc=DateTime.UtcNow,Error=ex.Message});}
-                finally{Interlocked.Exchange(ref _physicalBusy,0);}
+                finally{Thread.CurrentPrincipal=previousPrincipal;Interlocked.Exchange(ref _physicalBusy,0);}
             });
         }
     }
