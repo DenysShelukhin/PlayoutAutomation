@@ -234,13 +234,20 @@ namespace TAS.Server
             }
             var newPath=IncomingFiles.Within(Local.Folder,Path.Combine(Local.Folder,j.NewFile));
             var preparedPath=File.Exists(candidatePath)?candidatePath:newPath;
-            if(!File.Exists(preparedPath) || AtomicMediaCopy.Hash(preparedPath)!=j.CandidateHash)throw new IOException("Prepared/recovered revision hash mismatch; input and previous version retained");
+            if(!File.Exists(preparedPath))throw new IOException("Prepared revision missing; input retained");
+            var preparedRoot=File.Exists(candidatePath)?_engine.IncomingWorkFolder:Local.Folder;
+            var staged=new IncomingWorkMedia{Directory=new IncomingWorkDirectory{Folder=preparedRoot},FileName=Path.GetFileName(preparedPath),MediaType=TMediaType.Movie,MediaStatus=TMediaStatus.Copied};
+            staged.Verify(true);if(staged.MediaStatus!=TMediaStatus.Available)throw new IOException("Prepared revision not readable");
+            // Verify the completed native result outside the playback locks, then
+            // keep this exclusive identity lease through rename and SQL publication.
+            // No writer can change the verified bytes in the publication interval.
+            using(var publication=IncomingFiles.Open(preparedRoot,preparedPath)){
+            if(IncomingFiles.Hash(publication)!=j.CandidateHash || publication.Length!=(long)staged.FileSize)throw new IOException("Prepared/recovered revision hash mismatch; input and previous version retained");
+            var publicationIdentity=IncomingFiles.Identity(publication);
             // ScheduledUsers and NotifyMediaVerified touch the rundown. Never take
             // its lock after the media gate: the playback thread holds them in reverse.
             lock(_engine.RundownSync) lock(IncomingMediaGate.Sync){
                 if(Busy(j.Target) || _archive.HasPending(j.Target)){j.Error="Waiting for material to become idle";return;}
-                var staged=new IncomingWorkMedia{Directory=new IncomingWorkDirectory{Folder=File.Exists(candidatePath)?_engine.IncomingWorkFolder:Local.Folder},FileName=File.Exists(candidatePath)?j.Candidate:j.NewFile,MediaType=TMediaType.Movie,MediaStatus=TMediaStatus.Copied};
-                staged.Verify(true);if(staged.MediaStatus!=TMediaStatus.Available)throw new IOException("Prepared revision not readable");
                 if(ScheduledUsers(j.Target).Any(e=>e.ScheduledTc<staged.TcStart || e.ScheduledTc+e.Duration>staged.TcStart+staged.Duration))
                     throw new IOException("New revision is shorter than an existing scheduled cut; previous material retained for review");
                 if(!File.Exists(newPath) && !File.Exists(candidatePath))throw new IOException("Prepared revision disappeared");
@@ -248,9 +255,11 @@ namespace TAS.Server
                 try {
                 target.IsVerified=false;target.LastUpdated=DateTime.UtcNow;target.MediaStatus=TMediaStatus.Copying;target.FileName=j.NewFile;target.Folder="";target.Duration=staged.Duration;target.DurationPlay=staged.Duration;target.TcStart=staged.TcStart;target.TcPlay=staged.TcStart;target.VideoFormat=staged.VideoFormat;target.AudioChannelMapping=TAudioChannelMapping.Stereo;
                 IncomingPersistence.Save(target,Local); // durable GUID/path before watcher sees final filename
-                if(!File.Exists(newPath)){using(var f=IncomingFiles.Open(_engine.IncomingWorkFolder,candidatePath)){j.NewIdentity=IncomingFiles.Identity(f);IncomingFiles.Move(f,newPath);}}
-                target.MediaStatus=TMediaStatus.Copied;target.Verify(true);if(target.MediaStatus!=TMediaStatus.Available)throw new IOException("Published revision failed native verification");
-                using(var f=IncomingFiles.Inspect(Local.Folder,newPath)){if((j.NewIdentity!=null && IncomingFiles.Identity(f)!=j.NewIdentity) || IncomingFiles.Hash(f)!=j.CandidateHash)throw new IOException("Published identity/content changed; cleanup prohibited");j.NewIdentity=IncomingFiles.Identity(f);}
+                if(!File.Exists(newPath)){j.NewIdentity=publicationIdentity;IncomingFiles.Move(publication,newPath);}
+                if((j.NewIdentity!=null && publicationIdentity!=j.NewIdentity) || IncomingFiles.Identity(publication)!=publicationIdentity)throw new IOException("Published identity changed; cleanup prohibited");
+                // Same exclusively leased file already passed native full QC,
+                // metadata verification and SHA above; no second disk scan here.
+                j.NewIdentity=publicationIdentity;target.FileSize=staged.FileSize;target.LastUpdated=staged.LastUpdated;target.IsVerified=true;target.MediaStatus=TMediaStatus.Available;
                 target.TcPlay=target.TcStart;target.DurationPlay=target.Duration;IncomingPersistence.Save(target,Local);confirmed=true;
                 _archive.RequestCommittedRevision(target,j.CandidateHash);
                 j.State="Committed";j.Error=null;Persist();_engine.NotifyMediaVerified(new MediaEventArgs(target));
@@ -263,16 +272,15 @@ namespace TAS.Server
                         // Park our immutable version before restoring the previous pointer, so the
                         // directory watcher cannot register an orphan under a different GUID.
                         if(File.Exists(newPath) && !File.Exists(candidatePath)){
-                            using(var f=IncomingFiles.Open(Local.Folder,newPath)){
-                                if(IncomingFiles.Hash(f)!=j.CandidateHash || (j.NewIdentity!=null && IncomingFiles.Identity(f)!=j.NewIdentity))throw new IOException("Unconfirmed publication changed; all copies retained for review");
-                                IncomingFiles.Move(f,candidatePath);
-                            }
+                            if(IncomingFiles.Identity(publication)!=publicationIdentity)throw new IOException("Unconfirmed publication identity changed; all copies retained");
+                            IncomingFiles.Move(publication,candidatePath);
                         }
                         j.Previous?.Restore(target);
                         try{IncomingPersistence.Save(target,Local);}catch(Exception e){Log.Error(e,"Previous revision pointer could not be persisted; raw/old files retained");}
                     }
                     throw;
                 }
+            }
             }
         }
         private void DeleteOwned(IncomingJob j,string root,string path,string identity,string hash,Action completed)

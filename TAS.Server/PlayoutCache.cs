@@ -160,10 +160,14 @@ namespace TAS.Server
                     long incoming=File.Exists(destination)?0:size;
                     if(!PlayoutCacheRules.Fits(Used(),0,incoming,_settings.MaxBytes)||new DriveInfo(Path.GetPathRoot(_root)).AvailableFreeSpace<incoming+64L*1024*1024*1024){_error="Not Ready: cache capacity/reserve exhausted; protected/upcoming files retained";break;}
                     AtomicMediaCopy.Copy(source,destination,pair.Key,_cancel.Token,null).GetAwaiter().GetResult();
+                    using(var cacheLease=IncomingFiles.Open(_root,destination)){
+                    var identity=IncomingFiles.Identity(cacheLease);
+                    if(IncomingFiles.Hash(cacheLease)!=hash)throw new IOException("Cache content verification failed");
                     lock(IncomingMediaGate.Sync){
                         if(media.FullPath!=source||File.GetLastWriteTimeUtc(source).Ticks!=stamp||media.FileSize!=(ulong)size||archive.FullPath!=archivePath||File.GetLastWriteTimeUtc(archivePath).Ticks!=archiveStamp)throw new IOException("Source/archive revision changed during cache copy");
-                        string identity;using(var f=IncomingFiles.Inspect(_root,destination)){identity=IncomingFiles.Identity(f);if(IncomingFiles.Hash(f)!=hash)throw new IOException("Cache content verification failed");}
                         lock(_sync){if(_entries.ContainsKey(pair.Key))throw new IOException("Previous protected revision still cached");_entries[pair.Key]=new CacheEntry{Guid=pair.Key,File=filename,Identity=identity,Hash=hash,Source=source,SourceStamp=stamp,Archive=archivePath,ArchiveStamp=archiveStamp,Bytes=size};}Persist();
+                        cacheLease.Dispose(); // release before a waiting producer can LOAD the published index
+                    }
                     }
                     break; // one copy per pass, nearest air time first
                     }

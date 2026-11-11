@@ -83,14 +83,21 @@ namespace TAS.Server
         }
 
         internal void ScheduleChanged() => Interlocked.Exchange(ref _dirty, 1);
-        internal bool HasPending(Guid id) { lock(_sync)return _archive.ContainsKey(id)||_activeArchives.ContainsKey(id)||_activeRestores.ContainsKey(id); }
+        internal bool HasPending(Guid id)
+        {
+            // Playback/media gates must never wait for archive disk I/O.
+            if(!Monitor.TryEnter(_sync))return true;
+            try{return _archive.ContainsKey(id)||_activeArchives.ContainsKey(id)||_activeRestores.ContainsKey(id);}
+            finally{Monitor.Exit(_sync);}
+        }
         internal void RequestCommittedRevision(ServerMedia media,string hash)
         {
-            lock(_sync){
+            if(!Monitor.TryEnter(_sync))throw new IOException("Archive busy; committed revision retained for retry");
+            try{
                 if(_archive.TryGetValue(media.MediaGuid,out var previous) && previous.RevisionHash==hash)return;
                 if(_activeArchives.ContainsKey(media.MediaGuid)||_activeRestores.ContainsKey(media.MediaGuid))throw new IOException("Archive/Restore operation still owns this material");
                 _archive[media.MediaGuid]=new ArchiveIntent{Guid=media.MediaGuid,Name=media.MediaName,Phase="Pending",IngestConfirmed=true,RevisionHash=hash};Persist();
-            }
+            }finally{Monitor.Exit(_sync);}
         }
 
         private void OperationAdded(object sender, FileOperationEventArgs args)
@@ -168,15 +175,18 @@ namespace TAS.Server
             if (Interlocked.Exchange(ref _running, 1) != 0) return;
             try
             {
-                // Scan traverses events: match playback's rundown -> media order.
-                lock (_engine.RundownSync) lock (IncomingMediaGate.Sync) lock (_sync)
+                if (_disposed) return;
+                if (!(_manager.MediaDirectoryPRI is ServerDirectory initialized) || !initialized.IsInitialized) return;
+                // Only the event snapshot needs the rundown. Never hold it while
+                // waiting for the archive state lock or hashing/copying large media.
+                if (Volatile.Read(ref _dirty) != 0 || (DateTime.UtcNow - _lastScan).TotalSeconds >= 30)
                 {
-                    if (_disposed) return;
-                    if (!(_manager.MediaDirectoryPRI is ServerDirectory initialized) || !initialized.IsInitialized) return;
-                    if (Interlocked.Exchange(ref _dirty, 0) != 0 || (DateTime.UtcNow - _lastScan).TotalSeconds >= 30)
-                    {
-                        Scan(); _lastScan = DateTime.UtcNow;
-                    }
+                    List<IEvent> found;
+                    lock (_engine.RundownSync)found=SnapshotEvents();
+                    lock (_sync) {if(_disposed)return;Interlocked.Exchange(ref _dirty,0);Scan(found);_lastScan=DateTime.UtcNow;}
+                }
+                lock (_sync) {
+                    if(_disposed)return;
                     RestorePending();
                     ArchivePending();
                     PublishStatus();
@@ -186,7 +196,7 @@ namespace TAS.Server
             finally { Interlocked.Exchange(ref _running, 0); }
         }
 
-        private void Scan()
+        private List<IEvent> SnapshotEvents()
         {
             var found = new List<IEvent>();
             var seen = new HashSet<IEvent>();
@@ -199,6 +209,11 @@ namespace TAS.Server
                 foreach (var child in e.GetSubEvents()) stack.Push(child);
                 var next = e.GetNext(); if (next != null) stack.Push(next);
             }
+            return found;
+        }
+
+        private void Scan(List<IEvent> found)
+        {
             _events = found;
             var needed = _engine.AutoRestoreEnabled
                 ? found.Where(e => e.IsEnabled && !e.IsDeleted && e.EventType == TEventType.Movie && e.MediaGuid != Guid.Empty &&
@@ -268,16 +283,17 @@ namespace TAS.Server
 
         private void FinishRestore(Work w, CopyOperation op, ServerDirectory local)
         {
-            // NotifyMediaVerified also walks the rundown; match Tick/playback order.
-            lock (_engine.RundownSync) lock (_sync)
+            bool notify=false;
+            lock (_sync)
             {
                 if (_activeRestores.TryGetValue(w.Guid, out var current) && ReferenceEquals(current, op))
                     _activeRestores.Remove(w.Guid);
                 if (_disposed || !_restore.TryGetValue(w.Guid, out var requested) || !ReferenceEquals(requested, w)) return;
                 if (op.OperationStatus == FileOperationStatus.Finished && Ready(local.FindMediaByMediaGuid(w.Guid)))
-                { w.State = "Ready"; w.Error = null; _engine.NotifyMediaVerified(new MediaEventArgs(op.Dest)); }
+                { w.State = "Ready"; w.Error = null; notify=true; }
                 else Fail(w, "Native Restore did not finish Ready: " + string.Join("; ", op.OperationOutput.AsEnumerable().Reverse().Take(2).Reverse()));
             }
+            if(notify)lock(_engine.RundownSync)_engine.NotifyMediaVerified(new MediaEventArgs(op.Dest));
         }
 
         private void Fail(Work w, string error)

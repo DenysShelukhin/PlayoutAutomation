@@ -15,6 +15,24 @@ internal static class Program
     static void Check(bool pass, string name) { if (!pass) throw new Exception(name); checks++; Console.WriteLine("PASS " + name); }
     static async Task Tests(string root)
     {
+        // Real archive methods under a deliberately slow coordinator lock:
+        // a caller holding the playback gate must return conservatively at once.
+        var archive=(ArchiveAutomation)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(ArchiveAutomation));
+        var flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+        var archiveGate=new object();typeof(ArchiveAutomation).GetField("_sync",flags).SetValue(archive,archiveGate);
+        foreach(var field in new[]{"_archive","_activeArchives","_activeRestores"}){
+            var f=typeof(ArchiveAutomation).GetField(field,flags);f.SetValue(archive,Activator.CreateInstance(f.FieldType));
+        }
+        using(var held=new ManualResetEventSlim())using(var release=new ManualResetEventSlim()){
+            var slow=Task.Run(()=>{lock(archiveGate){held.Set();release.Wait(2000);}});held.Wait();
+            try{
+                var clock=System.Diagnostics.Stopwatch.StartNew();var pending=archive.HasPending(Guid.NewGuid());
+                Check(pending&&clock.ElapsedMilliseconds<1000,"busy archive lookup never blocks the playback gate");
+                bool deferred=false;try{archive.RequestCommittedRevision(null,"test");}catch(IOException){deferred=true;}
+                Check(deferred&&clock.ElapsedMilliseconds<1000,"busy archive publication defers without waiting under playback locks");
+            }finally{release.Set();await slow;}
+        }
+        Check(!archive.HasPending(Guid.NewGuid()),"idle empty archive reports no pending revision");
         var now = new DateTime(2026, 10, 30, 0, 0, 0, DateTimeKind.Utc);
         Check(ArchivePreparationRules.InWindow(now, now.AddHours(72), 72, false), "72h inclusive boundary");
         Check(!ArchivePreparationRules.InWindow(now, now.AddHours(72).AddTicks(1), 72, false), "outside horizon not restored");
@@ -88,6 +106,13 @@ internal static class Program
         Check(wrong&&File.Exists(moved),"cleanup rejects substituted file identity");
         wrong=false;try{IncomingFiles.Delete(managed,moved,identity,"other-hash");}catch(IOException){wrong=true;}
         Check(wrong&&File.Exists(moved),"cleanup rejects changed content");
+        using(var lease=IncomingFiles.Open(managed,moved)){
+            var verified=IncomingFiles.Hash(lease);var second=Path.Combine(managed,"leased-publication.mov");IncomingFiles.Move(lease,second);
+            bool writerDenied=false;try{using(var writer=new FileStream(second,FileMode.Open,FileAccess.Write,FileShare.ReadWrite)){} }catch(IOException){writerDenied=true;}
+            Check(writerDenied,"exclusive verified lease prevents changed bytes after publication rename");
+            Check(IncomingFiles.Identity(lease)==identity&&IncomingFiles.Hash(lease)==verified,"same-handle publication preserves verified content and identity");
+            IncomingFiles.Move(lease,moved);
+        }
         IncomingFiles.Seal(managed,moved);
         IncomingFiles.Delete(managed,moved,identity,hash);
         Check(!File.Exists(moved),"sealed owned file removed through guarded by-handle disposition");
