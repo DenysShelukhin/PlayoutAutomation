@@ -221,7 +221,7 @@ namespace TAS.Server
             if(target==null && string.IsNullOrEmpty(j.OldFile) && (j.Previous==null || j.Previous.Status==TMediaStatus.Required))target=Resolve(j);
             if(target==null)throw new IOException("Target GUID missing; refusing to create another material");
             if(j.Target==Guid.Empty){j.Target=target.MediaGuid;Persist();}
-            lock(IncomingMediaGate.Sync){if(Busy(j.Target) || _archive.HasPending(j.Target)){j.Error="Waiting: Program/preload/Preview or active media operation";return;}}
+            lock(_engine.RundownSync) lock(IncomingMediaGate.Sync){if(Busy(j.Target) || _archive.HasPending(j.Target)){j.Error="Waiting: Program/preload/Preview or active media operation";return;}}
             if(CasparStillUses(target.FullPath)){j.Error="Waiting: CasparCG still holds the existing Program/preload producer";return;}
             // Hash old immutable files outside the load barrier. No exclusive locks on playout reads.
             if(j.State!="Publishing"){
@@ -235,7 +235,9 @@ namespace TAS.Server
             var newPath=IncomingFiles.Within(Local.Folder,Path.Combine(Local.Folder,j.NewFile));
             var preparedPath=File.Exists(candidatePath)?candidatePath:newPath;
             if(!File.Exists(preparedPath) || AtomicMediaCopy.Hash(preparedPath)!=j.CandidateHash)throw new IOException("Prepared/recovered revision hash mismatch; input and previous version retained");
-            lock(IncomingMediaGate.Sync){
+            // ScheduledUsers and NotifyMediaVerified touch the rundown. Never take
+            // its lock after the media gate: the playback thread holds them in reverse.
+            lock(_engine.RundownSync) lock(IncomingMediaGate.Sync){
                 if(Busy(j.Target) || _archive.HasPending(j.Target)){j.Error="Waiting for material to become idle";return;}
                 var staged=new IncomingWorkMedia{Directory=new IncomingWorkDirectory{Folder=File.Exists(candidatePath)?_engine.IncomingWorkFolder:Local.Folder},FileName=File.Exists(candidatePath)?j.Candidate:j.NewFile,MediaType=TMediaType.Movie,MediaStatus=TMediaStatus.Copied};
                 staged.Verify(true);if(staged.MediaStatus!=TMediaStatus.Available)throw new IOException("Prepared revision not readable");

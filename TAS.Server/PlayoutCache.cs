@@ -59,7 +59,17 @@ namespace TAS.Server
             var path=Path.Combine(_root,e.File);if(!File.Exists(path)||new FileInfo(path).Length!=e.Bytes||File.GetLastWriteTimeUtc(path).Ticks!=e.SourceStamp)return false;
             try{using(var f=IncomingFiles.Inspect(_root,path))return IncomingFiles.Identity(f)==e.Identity;}catch(IOException){return false;}catch(System.ComponentModel.Win32Exception){return false;}
         }
-        private long Used(){if(Directory.EnumerateDirectories(_root).Any())throw new IOException("Unmanaged cache subdirectory; admission blocked");return Directory.EnumerateFiles(_root).Sum(p=>new FileInfo(p).Length);}
+        private long Used()
+        {
+            if(Directory.EnumerateDirectories(_root).Any())throw new IOException("Unmanaged cache subdirectory; admission blocked");
+            long total=0;
+            foreach(var path in Directory.EnumerateFiles(_root)){
+                // An owned expiry may remove a file between enumeration and stat.
+                // Only disappearance is benign; access and other I/O errors still fail closed.
+                try{total=checked(total+new FileInfo(path).Length);}catch(FileNotFoundException){}
+            }
+            return total;
+        }
         private Dictionary<Guid,DateTime> Requests()
         {
             var result=new Dictionary<Guid,DateTime>();var seen=new HashSet<IEvent>();var stack=new Stack<IEvent>(_engine.GetRootEvents());var now=_engine.CurrentTime;

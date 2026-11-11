@@ -168,7 +168,8 @@ namespace TAS.Server
             if (Interlocked.Exchange(ref _running, 1) != 0) return;
             try
             {
-                lock (IncomingMediaGate.Sync) lock (_sync)
+                // Scan traverses events: match playback's rundown -> media order.
+                lock (_engine.RundownSync) lock (IncomingMediaGate.Sync) lock (_sync)
                 {
                     if (_disposed) return;
                     if (!(_manager.MediaDirectoryPRI is ServerDirectory initialized) || !initialized.IsInitialized) return;
@@ -267,7 +268,8 @@ namespace TAS.Server
 
         private void FinishRestore(Work w, CopyOperation op, ServerDirectory local)
         {
-            lock (_sync)
+            // NotifyMediaVerified also walks the rundown; match Tick/playback order.
+            lock (_engine.RundownSync) lock (_sync)
             {
                 if (_activeRestores.TryGetValue(w.Guid, out var current) && ReferenceEquals(current, op))
                     _activeRestores.Remove(w.Guid);
