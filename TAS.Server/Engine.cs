@@ -481,6 +481,16 @@ namespace TAS.Server
         }
 
         public bool AbsoluteScheduleEnabled { get; set; }
+        public bool RepairAbsoluteForeground(IEvent source, DateTime anchor)
+        {
+            if(!HaveRight(EngineRight.Play)||!AbsoluteScheduleEnabled||!(source is Event ev))return false;
+            lock(RundownSync){
+                if(Playing!=ev||CurrentTime<anchor||CurrentTime>=anchor+ev.Duration-TimeSpan.FromSeconds(1))return false;
+                StartAbsolute(ev,anchor);
+                Logger.Warn("Absolute foreground repaired for current event {0}, original anchor {1:o}",ev.Id,anchor);
+                return true;
+            }
+        }
         internal static bool AbsoluteDriftNeedsCorrection(long observed,long wanted,long maximum)
             =>observed>=0&&observed<maximum&&wanted>=0&&wanted<maximum&&Math.Abs(wanted-observed)>12;
         public long? CorrectAbsolutePosition(IEvent source,DateTime anchor,long observed,DateTime sampledAt)

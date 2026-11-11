@@ -49,14 +49,16 @@ namespace TAS.Client.VPlayMigration
                     var actualPath=producer?.SelectSingleNode("filename")?.InnerText;long actual;
                     if(actualPath==null||!long.TryParse(producer.SelectSingleNode("file-frame-number")?.InnerText,out actual))return;
                     bool matched=string.Equals(Path.GetFullPath(actualPath),Path.GetFullPath(expected),StringComparison.OrdinalIgnoreCase);
-                    long? requested=null;
-                    if(matched&&sampledAt<end&&sampledAt-requestAt<TimeSpan.FromSeconds(1)&&sampledAt-_physicalCorrected>TimeSpan.FromSeconds(5)){
-                        requested=engine.CorrectAbsolutePosition(ev,anchor,actual,sampledAt);if(requested.HasValue)_physicalCorrected=DateTime.UtcNow;
+                    long? requested=null;bool repaired=false;
+                    if(sampledAt<end&&sampledAt-requestAt<TimeSpan.FromSeconds(1)&&sampledAt-_physicalCorrected>TimeSpan.FromSeconds(5)){
+                        if(matched)requested=engine.CorrectAbsolutePosition(ev,anchor,actual,sampledAt);
+                        else if(sampledAt-anchor>TimeSpan.FromSeconds(3))repaired=engine.RepairAbsoluteForeground(ev,anchor);
+                        if(requested.HasValue||repaired)_physicalCorrected=DateTime.UtcNow;
                     }
                     var report=new{Utc=sampledAt,EventId=ev.Id,MediaGuid=ev.MediaGuid,AnchorUtc=anchor,EndUtc=end,ActualFile=actualPath,ExpectedFile=expected,Matched=matched,
-                        ActualFrame=actual,ExpectedOffsetSeconds=(sampledAt-anchor).TotalSeconds,QuerySeconds=(sampledAt-requestAt).TotalSeconds,RequestedFrame=requested};
+                        ActualFrame=actual,ExpectedOffsetSeconds=(sampledAt-anchor).TotalSeconds,QuerySeconds=(sampledAt-requestAt).TotalSeconds,RequestedFrame=requested,RepairedForeground=repaired};
                     Save("absolute-physical-status.json",report);
-                    if(requested.HasValue)File.AppendAllText(Path.Combine(Home,"absolute-physical-corrections.jsonl"),JsonConvert.SerializeObject(report)+Environment.NewLine);
+                    if(requested.HasValue||repaired)File.AppendAllText(Path.Combine(Home,"absolute-physical-corrections.jsonl"),JsonConvert.SerializeObject(report)+Environment.NewLine);
                 }catch(Exception ex){Save("absolute-physical-error.json",new{Utc=DateTime.UtcNow,Error=ex.Message});}
                 finally{Interlocked.Exchange(ref _physicalBusy,0);}
             });

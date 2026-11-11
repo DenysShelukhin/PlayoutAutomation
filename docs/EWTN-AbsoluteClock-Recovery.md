@@ -32,3 +32,12 @@ actual corrections are written privately to separate JSON/JSONL receipts.
 This is not a frame-exact/gapless claim. Validate foreground identity before and
 after boundaries, producer frame position, and actual NDI/post-vMix audio/video.
 An as-run UI counter or SDK dropped-frame0 alone is insufficient acceptance.
+
+A current-event refresh itself consumes/replaces LOADBG. Clear its prepared-item
+registry at that point; otherwise a next event prepared before the current cold
+start can be reported prepared after its producer has already been replaced.
+The physical check also repairs a wrong foreground after a three-second boundary
+grace, using the existing ready current event and its original anchor. The engine
+rechecks current-event identity and the remaining slot under its normal gate.
+No database/rundown reload is involved. Normal five-second correction cooldown
+and final-second suppression apply.

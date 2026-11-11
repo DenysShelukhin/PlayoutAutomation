@@ -410,6 +410,10 @@ namespace TAS.Server
             {
                 channel.LoadBG(item);
                 channel.Play(item.VideoLayer);
+                // LOADBG above replaces every earlier preparation on this layer.
+                // Never retain a promise for the next event after consuming it
+                // to refresh the current foreground (late joins/clock recovery).
+                _loadedNext.TryRemove(ev.Layer, out _);
             }
             else
                 channel.Load(item);
