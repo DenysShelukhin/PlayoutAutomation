@@ -56,13 +56,15 @@ namespace TAS.Client.VPlayMigration
                     if(supported&&playable.Media!=null)TAS.Server.PlayoutCacheRules.Request(playable.Media);
                     if(supported&&Ready(playable.Media)){
                         mode="Scheduled media";reason=approved==null?"Original UTC anchor; native frame offset":"Bounded file-only override; full native technical proof";
-                        if(engine.Playing!=playable&&slot.End-now>TimeSpan.FromMilliseconds(250))engine.StartAbsolute(playable,slot.Begin);
+                        // A restored Playing row is not a physical channel map.
+                        // Rejoin once on controller startup even when its ID matches.
+                        if((engine.Playing!=playable||_absoluteState==null)&&slot.End-now>TimeSpan.FromMilliseconds(250))engine.StartAbsolute(playable,slot.Begin);
                         if(approved!=null&&engine.Playing==playable)RecordFileOverride(slot,playable);
                         if(engine.Playing==playable)CheckPhysicalClock(playable,slot.Begin,slot.End);
                     } else {
                         mode="Diagnostic filler";reason=supported?"Missing / Not Ready":"Special Event / Requires Review";
                         if(_diagnosticFiller!=null&&Ready(_diagnosticFiller.Media)){
-                            if(engine.Playing!=_diagnosticFiller)engine.StartAbsolute(_diagnosticFiller,now);
+                            if(engine.Playing!=_diagnosticFiller||_absoluteState==null)engine.StartAbsolute(_diagnosticFiller,now);
                         }else if(engine.Playing!=null)engine.Clear(VideoLayer.Program);
                     }
                 }
