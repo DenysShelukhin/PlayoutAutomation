@@ -14,7 +14,17 @@ namespace TAS.Server
         private readonly Queue<FileOperationBase> _queue = new Queue<FileOperationBase>();
         
         private readonly HashSet<FileOperationBase> _currentOperations = new HashSet<FileOperationBase>();
-        internal int MaxConcurrent { get; set; } = 1;
+        private int _maxConcurrent=1;
+        internal int MaxConcurrent
+        {
+            get=>Volatile.Read(ref _maxConcurrent);
+            set{
+                if(value<1)throw new ArgumentOutOfRangeException(nameof(value));
+                // Wake existing queued work when capacity rises. Lowering the
+                // limit drains running work; it never aborts a partial output.
+                if(Interlocked.Exchange(ref _maxConcurrent,value)<value)Task.Run(()=>RunOperation());
+            }
+        }
 
         public void Enqueue(FileOperationBase operation)
         {

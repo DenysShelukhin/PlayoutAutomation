@@ -53,6 +53,7 @@ namespace TAS.Server
         private readonly object _sync=new object();
         private Timer _timer;private FileSystemWatcher _watcher;private int _running;private bool _disposed,_startupEncoderGate=true;
         private static readonly NLog.Logger Log=NLog.LogManager.GetCurrentClassLogger();
+        private NativeIngestPolicy.Settings _lanes=new NativeIngestPolicy.Settings{MaxParallelJobs=1};
         private sealed class Observation {internal long Size;internal DateTime Stamp,Quiet;internal string Error;}
         internal IncomingCoordinator(Engine e,MediaManager manager,ArchiveAutomation archive)
         {
@@ -92,6 +93,11 @@ namespace TAS.Server
             if(Interlocked.Exchange(ref _running,1)!=0)return;
             try{lock(_sync){if(_disposed || !Local.IsInitialized || !Profile.IsInitialized)return;
                 if(_startupEncoderGate){if(System.Diagnostics.Process.GetProcessesByName("ffmpeg").Length>0){_manager.SetIncomingStatus("Incoming waiting: encoder from previous/external session still active");return;}_startupEncoderGate=false;}
+                _lanes=NativeIngestPolicy.Read();
+                if(FileManager.Current.IngestMaxConcurrentJobs!=_lanes.MaxParallelJobs){
+                    Log.Warn("AIR-02 native Ingest capacity {0}; running operations drain normally on reduction",_lanes.MaxParallelJobs);
+                    FileManager.Current.IngestMaxConcurrentJobs=_lanes.MaxParallelJobs;
+                }
                 Scan();ApplyContinuityRetries();
                 bool continuity=BroadcastContinuityQc.Enabled;var airNow=DateTime.UtcNow;
                 foreach(var j in _jobs.Where(j=>j.State!="Done"&&(j.State!="Failed"||continuity&&j.ContinuityRetryPending))
@@ -100,7 +106,7 @@ namespace TAS.Server
                     if(j.Retry>DateTime.UtcNow.Ticks)continue;
                     try{Advance(j);}catch(Exception ex){if(j.ContinuityRetryPending){j.ContinuityRetryPending=false;j.QcHistory.Add("Continuity retry blocked before encoding: "+ex.Message);}Fail(j,ex);}
                 }
-                _manager.SetIncomingStatus("Incoming ON; quiet="+_engine.IncomingQuietSeconds+"s; "+string.Join(" / ",_jobs.GroupBy(j=>j.State).Select(g=>g.Key+"="+g.Count()))+"\n"+
+                _manager.SetIncomingStatus("Incoming ON; native lanes="+_encoding.Count+"/"+_lanes.MaxParallelJobs+"; quiet="+_engine.IncomingQuietSeconds+"s; "+string.Join(" / ",_jobs.GroupBy(j=>j.State).Select(g=>g.Key+"="+g.Count()))+"\n"+
                     string.Join("\n",_observations.Where(o=>o.Value.Error!=null).Select(o=>Path.GetFileName(o.Key)+": "+o.Value.Error).Concat(_jobs.Where(j=>j.State!="Done").Select(j=>j.Name+" ["+j.State+"] "+j.Error)).Take(30)));
             }}catch(Exception ex){_manager.SetIncomingStatus("Incoming ERROR; inputs retained: "+ex.Message);Log.Error(ex,"Incoming pass");}
             finally{Interlocked.Exchange(ref _running,0);}
@@ -143,7 +149,8 @@ namespace TAS.Server
         }
         private void StartIngest(IncomingJob j)
         {
-            if(_encoding.Count!=0 || Server.FileManager.Current.GetOperationQueue().OfType<IngestOperation>().Any())return;
+            bool previousSameName=_jobs.Any(x=>x!=j&&Key(x.Name)==Key(j.Name)&&NativeIngestPolicy.Precedes(j.Created,j.Id,x.Created,x.Id)&&x.State!="Done"&&x.State!="Failed");
+            if(!NativeIngestPolicy.CanStart(_lanes,j.Id,_encoding.Count,FileManager.Current.GetOperationQueue().OfType<IngestOperation>().Count(),previousSameName))return;
             if(BroadcastContinuityQc.Enabled&&BroadcastContinuityQc.Due(j.Name,DateTime.UtcNow)==null){
                 const string waiting="Waiting: no current/future approved VPlay use within72h; retained input, no encoding";
                 if(j.Error!=waiting){j.Error=waiting;Persist();}return;
@@ -152,9 +159,12 @@ namespace TAS.Server
             using(var f=IncomingFiles.Open(Profile.Folder,path))if(IncomingFiles.Identity(f)!=j.InputIdentity || IncomingFiles.Hash(f)!=j.InputHash)throw new IOException("Managed input changed; retained for review");
             var source=Profile.FindMediaFirst(m=>string.Equals(((MediaBase)m).FullPath,path,StringComparison.OrdinalIgnoreCase)) as IngestMedia;
             if(source==null){source=new IngestMedia{FileName=j.Input,Folder="",MediaName=j.Name,MediaGuid=j.Id,MediaType=TMediaType.Movie};Profile.AddMedia(source);}else Profile.UpdateMediaGuid(source,j.Id);
-            source.Verify(true);if(!source.IsVerified || source.MediaStatus!=TMediaStatus.Available)throw new IOException("Input verification failed");
+            source.Verify(true);string admissionWarning=null;
+            if(source.IsVerified&&source.MediaStatus==TMediaStatus.ValidationError&&BroadcastContinuityQc.Enabled)admissionWarning=TryManagedContainerDuration(source,path);
+            if(!source.IsVerified || source.MediaStatus!=TMediaStatus.Available)throw new IOException("Input verification failed");
             var work=new IncomingWorkDirectory{Folder=_engine.IncomingWorkFolder};
             var op=(IngestOperation)Server.FileManager.Current.CreateFileOperation(TFileOperationKind.Ingest);
+            if(admissionWarning!=null){op.AddWarningMessage(admissionWarning);if(j.QcHistory==null)j.QcHistory=new List<string>();j.QcHistory.Add(DateTime.UtcNow.ToString("o")+" previous admission: "+j.Error+"; "+admissionWarning);}
             op.Source=source;op.DestDirectory=work;op.ManagedIncoming=true;op.TryCount=1;op.StartTC=source.TcStart;op.Trim=false;
             op.DestProperties=new PersistentMediaProxy{MediaGuid=j.Id,MediaName=j.Name,FileName=j.Candidate,MediaType=TMediaType.Movie,VideoFormat=TVideoFormat.HD1080i5000,Duration=source.Duration,TcStart=source.TcStart};
             op.AspectConversion=TAspectConversion.NoConversion;op.SourceColorSpace=IngestColorSpace.Auto;
@@ -166,6 +176,19 @@ namespace TAS.Server
                 catch(Exception ex){j.State="Failed";j.Error="Completed job verification failed; input retained: "+ex.Message;}SafePersist();}};
             Server.FileManager.Current.Queue(op);
         }
+        // Caller has already verified the exclusive complete input identity/SHA.
+        // Keep this local to managed admission, never change global MediaChecker.
+        internal static string TryManagedContainerDuration(IngestMedia source,string path)
+        {
+            if(!source.IsVerified||source.MediaStatus!=TMediaStatus.ValidationError||!BroadcastContinuityQc.Enabled)return null;
+            using(var metadata=new TAS.FFMpegUtils.FFMpegWrapper(path)){
+                var video=metadata.GetVideoDuration();var audio=metadata.GetAudioDuration();var file=metadata.GetFileDuration();
+                if(!NativeIngestPolicy.ContainerDurationFallback(true,true,metadata.GetWidth()>0&&metadata.GetHeight()>0,video.TotalSeconds,audio.TotalSeconds,file.TotalSeconds))return null;
+                var rate=metadata.GetFrameRate();var duration=file.Round(new RationalNumber(rate.Num,rate.Den));if(duration<=TimeSpan.Zero)return null;
+                source.Duration=duration;source.DurationPlay=duration;source.MediaStatus=TMediaStatus.Available;
+                return "Broadcast Continuity QC: managed source video stream duration unavailable; positive agreeing container/audio duration used ("+file.TotalSeconds.ToString("R",System.Globalization.CultureInfo.InvariantCulture)+"s). A/V stream-duration match is uncertain; required A/V, encoder -xerror, full output decode and integrity remain blocking.";
+            }
+        }
         private string _retryGeneration;
         private void ApplyContinuityRetries()
         {
@@ -176,16 +199,17 @@ namespace TAS.Server
             bool changed=false;
             foreach(var entry in plan.Jobs){
                 var job=_jobs.SingleOrDefault(j=>j.Id.ToString()==entry.Id);
-                if(job==null||job.ContinuityRetryGeneration==plan.Generation||job.State!="Failed"||job.InputHash!=entry.InputHash||
-                    !BroadcastContinuityQc.SoftFailure(job.Error)||BroadcastContinuityQc.Due(job.Name,DateTime.UtcNow)==null)continue;
+                if(job==null||job.ContinuityRetryGeneration==plan.Generation||job.InputHash!=entry.InputHash||BroadcastContinuityQc.Due(job.Name,DateTime.UtcNow)==null)continue;
+                bool queuedAdmission=NativeIngestPolicy.WakeQueued(job.State,job.Error,entry.Reason);
+                if(!queuedAdmission&&(job.State!="Failed"||!BroadcastContinuityQc.SoftFailure(job.Error)))continue;
                 if(!File.Exists(IncomingFiles.Within(Profile.Folder,Path.Combine(Profile.Folder,job.Input))))continue;
                 if(job.QcHistory==null)job.QcHistory=new List<string>();
-                job.QcHistory.Add(DateTime.UtcNow.ToString("o")+" previous Failed; attempts="+job.Attempts+"; "+job.Error);
+                job.QcHistory.Add(DateTime.UtcNow.ToString("o")+" previous "+job.State+"; attempts="+job.Attempts+"; "+job.Error);
                 job.QcHistory.Add("Owner-authorized BroadcastContinuity retry "+plan.Generation+"; same native ID/input hash/target GUID; next air use determines order");
                 // Retain Failed plus a durable retry intent until the actual lane
                 // opens. Twenty future retries must not consume healthy ahead
                 // slots or prevent a nearer new source from being delivered.
-                job.ContinuityRetryGeneration=plan.Generation;job.ContinuityRetryPending=true;job.Retry=0;job.Attempts=0;changed=true;
+                job.ContinuityRetryGeneration=plan.Generation;job.ContinuityRetryPending=!queuedAdmission;job.Retry=0;job.Attempts=0;changed=true;
             }
             if(changed)Persist();_retryGeneration=plan.Generation;
         }
