@@ -93,6 +93,19 @@ internal static class Program
         gate.SetResult(true);
         for (int i = 0; i < 100 && jobs.Any(j => j.OperationStatus != FileOperationStatus.Finished); i++) await Task.Delay(10);
         Check(max == 2 && jobs.All(j => j.OperationStatus == FileOperationStatus.Finished), "native queue completes without exceeding concurrency");
+        var raised=new FileOperationQueue();var firstGate=new TaskCompletionSource<bool>();var secondGate=new TaskCompletionSource<bool>();
+        var laneFirst=new TestOperation(()=>firstGate.Task);var laneSecond=new TestOperation(()=>secondGate.Task);raised.Enqueue(laneFirst);raised.Enqueue(laneSecond);
+        for(int i=0;i<100&&laneFirst.OperationStatus!=FileOperationStatus.InProgress;i++)await Task.Delay(10);
+        Check(laneFirst.OperationStatus==FileOperationStatus.InProgress&&laneSecond.OperationStatus==FileOperationStatus.Unknown,"one lane queues the second operation");
+        raised.MaxConcurrent=2;
+        for(int i=0;i<100&&laneSecond.OperationStatus!=FileOperationStatus.InProgress;i++)await Task.Delay(10);
+        Check(laneSecond.OperationStatus==FileOperationStatus.InProgress,"raising native capacity wakes existing queued operation");
+        raised.MaxConcurrent=1;var laneThird=new TestOperation(()=>Task.FromResult(true));raised.Enqueue(laneThird);
+        firstGate.SetResult(true);await Task.Delay(50);
+        Check(laneSecond.OperationStatus==FileOperationStatus.InProgress&&laneThird.OperationStatus==FileOperationStatus.Unknown,"rollback to one drains existing work without abort or new overlap");
+        secondGate.SetResult(true);
+        for(int i=0;i<100&&laneThird.OperationStatus!=FileOperationStatus.Finished;i++)await Task.Delay(10);
+        Check(laneThird.OperationStatus==FileOperationStatus.Finished,"one-lane queue continues after two-lane drain");
         var failure = new TestOperation(() => Task.FromResult(false)) { TryCount = 1 };
         queue.Enqueue(failure);
         for (int i = 0; i < 100 && failure.OperationStatus != FileOperationStatus.Failed; i++) await Task.Delay(10);
@@ -144,6 +157,15 @@ internal static class Program
     }
     static int Main(string[] args)
     {
+        if(args.Length==2&&args[0]=="--managed-metadata"){
+            try{
+                var source=new TAS.Server.Media.IngestMedia{MediaStatus=TMediaStatus.ValidationError,IsVerified=true};
+                var warning=IncomingCoordinator.TryManagedContainerDuration(source,args[1]);
+                Check(warning!=null&&warning.Contains("uncertain"),"real native metadata fallback records uncertain stream duration");
+                Check(source.MediaStatus==TMediaStatus.Available&&source.Duration==TimeSpan.FromSeconds(18.16)&&source.DurationPlay==source.Duration,"real native MPEG admission obtains frame-rounded container duration");
+                Console.WriteLine("REAL NATIVE METADATA CHECKS PASS");return 0;
+            }catch(Exception e){Console.Error.WriteLine(e);return 1;}
+        }
         try { if (args.Length != 1) throw new ArgumentException("Disposable test directory required"); Tests(args[0]).GetAwaiter().GetResult(); Console.WriteLine("ALL " + checks + " CHECKS PASS"); return 0; }
         catch (Exception e) { Console.Error.WriteLine(e); return 1; }
     }

@@ -35,6 +35,31 @@ internal static class Program
     {
         try
         {
+            Check(NativeIngestPolicy.Limit(1,"AIR-02","AIR-02",2,true)==2,"owner host policy allows two native lanes");
+            Check(NativeIngestPolicy.Limit(1,"AIR-02","OTHER",2,true)==1,"native lane policy cannot apply on other host");
+            Check(NativeIngestPolicy.Limit(1,"AIR-02","AIR-02",3,true)==1,"more than two native lanes fails closed");
+            Check(NativeIngestPolicy.Limit(1,"AIR-02","AIR-02",0,true)==1,"zero native lanes is not an admission pause");
+            Check(NativeIngestPolicy.Limit(1,"AIR-02","AIR-02",2,false)==1,"two lanes require active continuity mode");
+            var laneId=Guid.NewGuid();var lanes=new NativeIngestPolicy.Settings{MaxParallelJobs=2,SecondLaneJobIds=new[]{laneId.ToString()}};
+            Check(NativeIngestPolicy.CanStart(lanes,laneId,1,1,false),"bounded native second lane accepts explicit test identity");
+            Check(!NativeIngestPolicy.CanStart(lanes,Guid.NewGuid(),1,1,false),"bounded native second lane refuses unlisted identity");
+            Check(!NativeIngestPolicy.CanStart(lanes,laneId,2,2,false),"native admission never starts a third job");
+            Check(!NativeIngestPolicy.CanStart(lanes,laneId,0,0,true),"same-name unfinished revision serializes before encoding");
+            Check(NativeIngestPolicy.CanStart(lanes,Guid.NewGuid(),0,0,false),"primary lane retains nearest-air admission");
+            Check(NativeIngestPolicy.Precedes(100,Guid.Parse("00000000-0000-0000-0000-000000000002"),100,Guid.Parse("00000000-0000-0000-0000-000000000001")),"equal-created same-name jobs have deterministic predecessor");
+            Check(!NativeIngestPolicy.Precedes(100,Guid.Parse("00000000-0000-0000-0000-000000000001"),100,Guid.Parse("00000000-0000-0000-0000-000000000002")),"same-name predecessor rule cannot mutually deadlock equal-created jobs");
+            Check(NativeIngestPolicy.ContainerDurationFallback(true,true,true,0,18.168,18.168),"unknown video duration uses agreeing complete container/audio metadata");
+            Check(!NativeIngestPolicy.ContainerDurationFallback(true,true,true,18,20,20),"measured A/V duration mismatch is not softened");
+            Check(!NativeIngestPolicy.ContainerDurationFallback(true,true,false,0,18,18),"missing video is never a duration fallback");
+            Check(!NativeIngestPolicy.ContainerDurationFallback(true,true,true,0,0,18),"missing audio is never a duration fallback");
+            Check(!NativeIngestPolicy.ContainerDurationFallback(true,false,true,0,18,18),"duration fallback does not change Library/Archive or legacy QC");
+            Check(!NativeIngestPolicy.ContainerDurationFallback(false,true,true,0,18,18),"Strict metadata behavior is unchanged");
+            Check(!NativeIngestPolicy.ContainerDurationFallback(true,true,true,0,18,20),"unknown video plus conflicting audio/container remains blocked");
+            Check(!NativeIngestPolicy.ContainerDurationFallback(true,true,true,double.NaN,18,18),"invalid metadata is not assumed safe");
+            Check(NativeIngestPolicy.WakeQueued("Queued","Input verification failed","UnknownStreamDuration"),"metadata retry intent wakes retained queued input without changing state");
+            Check(!NativeIngestPolicy.WakeQueued("Failed","decode failed","UnknownStreamDuration"),"metadata retry intent cannot wake a hard Failed decode");
+            Check(!NativeIngestPolicy.WakeQueued("Done","Input verification failed","UnknownStreamDuration"),"completed native input is never repeated by admission retry");
+            Check(!NativeIngestPolicy.WakeQueued("Queued","different error","UnknownStreamDuration"),"metadata retry refuses unrelated queued error evidence");
             if (args.Length == 5 && (args[0] == "--command" || args[0] == "--command-v1"))
             {
                 var info = BroadcastProbe.Read(args[1], args[2]);

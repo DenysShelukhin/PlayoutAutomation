@@ -20,6 +20,11 @@ namespace TAS.Server
         private readonly FileOperationQueue _queueExportOperation = new FileOperationQueue();
         private readonly FileOperationQueue _queueRestoreOperation = new FileOperationQueue();
         internal int RestoreMaxConcurrentJobs { set => _queueRestoreOperation.MaxConcurrent = value; }
+        internal int IngestMaxConcurrentJobs
+        {
+            get=>_queueConvertOperation.MaxConcurrent;
+            set{if(value<1||value>2)throw new ArgumentOutOfRangeException(nameof(value));_queueConvertOperation.MaxConcurrent=value;}
+        }
 
         public static FileManager Current { get; } = new FileManager();
 

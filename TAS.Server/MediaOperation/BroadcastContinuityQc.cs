@@ -42,7 +42,7 @@ namespace TAS.Server.MediaOperation
         }
         [DataContract] internal sealed class RetryItem
         {
-            [DataMember] public string Id,InputHash;
+            [DataMember] public string Id,InputHash,Reason;
         }
         internal static bool SoftFailure(string error)
         {
