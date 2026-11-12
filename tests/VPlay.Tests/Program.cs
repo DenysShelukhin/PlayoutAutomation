@@ -94,6 +94,17 @@ static class Program
     }
     static void AbsoluteBackground()
     {
+        var loop=typeof(TAS.Server.CasparServerChannel).GetMethod("LoopAbsoluteDiagnostic",BindingFlags.Static|BindingFlags.NonPublic);
+        var loopCases=new[]{
+            new object[]{true,TEventType.Movie,"VP26T:fixture","ID_diagnostic",true,true},
+            new object[]{false,TEventType.Movie,"VP26T:fixture","ID_diagnostic",true,false},
+            new object[]{true,TEventType.Movie,"VP26E:source","ID_diagnostic",true,false},
+            new object[]{true,TEventType.Movie,"VP26T:fixture","ordinary",true,false},
+            new object[]{true,TEventType.Movie,"VP26T:fixture","ID_diagnostic",false,false},
+            new object[]{true,TEventType.Live,"VP26T:fixture","ID_diagnostic",true,false},
+            new object[]{true,TEventType.Movie,null,null,true,false}
+        };
+        foreach(var c in loopCases){if((bool)loop.Invoke(null,c.Take(5).ToArray())!=(bool)c[5])throw new Exception("Absolute diagnostic producer loop scope");checks++;Console.WriteLine("PASS absolute diagnostic producer loop scope");}
         var method=typeof(TAS.Server.CasparServerChannel).GetMethod("PreserveDiagnosticBackground",BindingFlags.Static|BindingFlags.NonPublic);
         for(int changed=-1;changed<5;changed++){
             var flags=new object[]{true,true,true,true,true};if(changed>=0)flags[changed]=false;

@@ -379,6 +379,9 @@ namespace TAS.Server
 
         internal static bool PreserveDiagnosticBackground(bool absolute,bool diagnostic,bool looping,bool sameVisible,bool otherBackground)
             =>absolute&&diagnostic&&looping&&sameVisible&&otherBackground;
+        internal static bool LoopAbsoluteDiagnostic(bool absolute,TEventType type,string idAux,string name,bool looping)
+            =>absolute&&looping&&type==TEventType.Movie&&(idAux??"").StartsWith("VP26T:",StringComparison.Ordinal)&&
+              (name??"").StartsWith("ID_",StringComparison.OrdinalIgnoreCase);
         private bool KeepAbsoluteBackground(Event ev)=>PreserveDiagnosticBackground((ev.Engine as Engine)?.AbsoluteScheduleEnabled==true,
             ev.EventType==TEventType.Movie&&(ev.IdAux??"").StartsWith("VP26T:",StringComparison.Ordinal)&&(ev.EventName??"").StartsWith("ID_",StringComparison.OrdinalIgnoreCase),ev.IsLoop,
             _visible.TryGetValue(ev.Layer,out var visible)&&visible==ev,_loadedNext.TryGetValue(ev.Layer,out var background)&&background!=ev);
@@ -719,7 +722,14 @@ namespace TAS.Server
                 item.Length = (int)aEvent.LengthInFrames;
             }
             item.VideoLayer = (int)aEvent.Layer;
-            item.Loop = false;
+            // The native event can loop while a scheduled successor occupies
+            // background. Its foreground producer must loop too: reloading it
+            // would consume that successor; stopping at EOF holds a black tail.
+            // Only the existing absolute diagnostic may loop in Caspar. Every
+            // ordinary Ready producer still has Loop=false and replaces it at
+            // the unchanged absolute anchor.
+            item.Loop = LoopAbsoluteDiagnostic((aEvent.Engine as Engine)?.AbsoluteScheduleEnabled==true,
+                aEvent.EventType,aEvent.IdAux,aEvent.EventName,aEvent.IsLoop);
 
             item.Transition.Type = (Svt.Caspar.TransitionType)aEvent.TransitionType;
             item.Transition.Duration = (int)((aEvent.TransitionTime.Ticks - aEvent.TransitionPauseTime.Ticks) / aEvent.Engine.FrameTicks);
