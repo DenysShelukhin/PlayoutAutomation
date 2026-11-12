@@ -177,7 +177,11 @@ namespace TAS.Client.VPlayMigration
                     } else if (action != "Refresh") throw new IOException("Unknown migration request");
                     Save("response.json", new { Success = true, Action = action, Utc = DateTime.UtcNow }); File.Delete(requestPath);
                 }
-                Reconcile(); _lastError = null;
+                // Reconciliation shares the UI dispatcher with the 200ms air
+                // clock. Defer noncritical inventory work near an original
+                // boundary; current-slot readiness is checked independently.
+                if(ReconcileAllowed())Reconcile();
+                _lastError = null;
             } catch (Exception ex) {
                 _lastError = ex.Message;
                 try { Save("response.json", new { Success = false, Error = _lastError, Utc = DateTime.UtcNow });
@@ -235,34 +239,79 @@ namespace TAS.Client.VPlayMigration
             var seen = new HashSet<IEvent>(); var stack = new Stack<IEvent>(); stack.Push(root);
             while (stack.Count > 0) { var e = stack.Pop(); if (!seen.Add(e)) continue; yield return e; foreach (var child in e.GetSubEvents()) stack.Push(child); if (e != root && e.GetNext() != null) stack.Push(e.GetNext()); }
         }
+        internal static bool CanReconcile(DateTime now,DateTime? next)
+            =>!next.HasValue||next.Value-now>TimeSpan.FromSeconds(2);
+        internal static string NativeSourceIdentity(string id)
+            =>id!=null&&id.Length>=32&&(id.StartsWith("VP26E:",StringComparison.Ordinal)||id.StartsWith("VP26T:",StringComparison.Ordinal))?id.Substring(id.Length-32):null;
+        private bool _reconciling;
+        private bool ReconcileAllowed()
+        {
+            var now=Engine.CurrentTime;var next=_absoluteSources?.FirstOrDefault(s=>s.Begin>now);
+            return !((Engine as TAS.Server.Engine)?.AbsoluteScheduleEnabled==true)||CanReconcile(now,next?.Begin);
+        }
         private void Reconcile()
         {
+            if(_reconciling)return;
+            var elapsed=System.Diagnostics.Stopwatch.StartNew();
             var path = Within(Path.Combine(Home, "events.json")); var catalogPath = Within(Path.Combine(Home, "catalog.json"));
             if (!File.Exists(path) || !File.Exists(catalogPath)) return;
             var sourceEvents = JArray.Parse(File.ReadAllText(path)); var catalog = JArray.Parse(File.ReadAllText(catalogPath));
             var native = Events().Where(e => e.IdAux != null && (e.IdAux.StartsWith("VP26E:") || e.IdAux.StartsWith("VP26T:"))).ToArray();
             var local = Engine.MediaManager.MediaDirectoryPRI;
             var media = local.GetAllFiles().ToArray();
+            // Preserve original ordering, duplicate groups and exact identity
+            // matching without rescanning every native event for every source.
+            var sourcesByAsset=sourceEvents.Cast<JObject>().ToLookup(s=>(string)s["AssetKey"],StringComparer.Ordinal);
+            var nativeByIdentity=native.ToLookup(e=>NativeSourceIdentity(e.IdAux),StringComparer.Ordinal);
+            var mediaByName=media.ToLookup(m=>m.MediaName,StringComparer.OrdinalIgnoreCase);
             var status = new List<object>();
-            foreach (JObject asset in catalog) {
+            var assets=catalog.GetEnumerator();var dispatcher=Dispatcher.CurrentDispatcher;
+            _reconciling=true;int slices=0;double maximumSlice=0;var setupMilliseconds=elapsed.Elapsed.TotalMilliseconds;
+            Action step=null;
+            step=()=>{
+             try{
+              // All native objects remain on their original dispatcher. Yield
+              // inventory I/O between small slices so the air timer can run.
+              if(!ReconcileAllowed()){
+                var wait=new DispatcherTimer(DispatcherPriority.Background,dispatcher){Interval=TimeSpan.FromMilliseconds(200)};
+                wait.Tick+=(_,__)=>{wait.Stop();step();};wait.Start();return;
+              }
+              var budget=System.Diagnostics.Stopwatch.StartNew();slices++;
+              while(assets.MoveNext()){
+                var asset=(JObject)assets.Current;
                 var key = (string)asset["Key"]; var name = (string)asset["LogicalName"];
-                var matches = media.Where(m => string.Equals(m.MediaName, name, StringComparison.OrdinalIgnoreCase)).ToArray();
+                var matches = mediaByName[name].Where(m=>string.Equals(m.MediaName,name,StringComparison.OrdinalIgnoreCase)).ToArray();
                 var state = matches.Length > 1 ? "Ambiguous" : "Missing"; IMedia found = matches.SingleOrDefault(m => matches.Length == 1);
                 if (found != null) { asset["MediaGuid"] = found.MediaGuid.ToString(); state = Ready(found) ? "Ready" : found.MediaStatus == TMediaStatus.Available && found.FileExists() ? "Not Ready / Cache Pending" : "Ingesting"; }
                 else if (Guid.TryParse((string)asset["MediaGuid"], out var id) && id != Guid.Empty) {
                     var archived = Engine.MediaManager.ArchiveDirectory?.Find(id); if (Ready(archived)) state = "Archived / Restore Pending";
                 }
                 var idText = (string)asset["MediaGuid"];
-                foreach (JObject se in sourceEvents.Where(s => (string)s["AssetKey"] == key)) {
+                foreach (JObject se in sourcesByAsset[key]) {
                     var eventId = ((string)se["ItemId"]).Replace("-", ""); var sequence = (int)se["Sequence"];
                     var review = (string)se["ParseStatus"] != "Pending";
-                    if (Guid.TryParse(idText, out var guid) && guid != Guid.Empty) foreach (var e in native.Where(e => e.IdAux.EndsWith(eventId, StringComparison.Ordinal)))
-                        if (e.MediaGuid != guid && e.PlayState == TPlayState.Scheduled) { e.MediaGuid = guid; e.Save(); }
+                    if (Guid.TryParse(idText, out var guid) && guid != Guid.Empty) foreach (var e in nativeByIdentity[eventId])
+                        if (!e.IsDeleted && NativeSourceIdentity(e.IdAux)==eventId && e.MediaGuid != guid && e.PlayState == TPlayState.Scheduled) { e.MediaGuid = guid; e.Save(); }
                     status.Add(new { Sequence = sequence, Begin = (string)se["Begin"], Title = (string)se["Title"], EditorialTitle = (string)se["EditorialTitle"], Source = (string)se["OriginalSource"], MediaGuid = idText, Status = review ? "Special Event / Requires Review" : state, MatchStatus = (string)se["MatchStatus"] });
                 }
-            }
+                if(budget.ElapsedMilliseconds>=25){
+                    maximumSlice=Math.Max(maximumSlice,budget.Elapsed.TotalMilliseconds);
+                    dispatcher.BeginInvoke(DispatcherPriority.Background,step);return;
+                }
+              }
+            maximumSlice=Math.Max(maximumSlice,budget.Elapsed.TotalMilliseconds);
             foreach (var se in sourceEvents.Where(s => (string)s["Kind"] != "File")) status.Add(new { Sequence = (int)se["Sequence"], Status = "Special Event / Requires Review" });
             Save("catalog.json", catalog); Save("readiness.json", new { Utc = DateTime.UtcNow, Error = _lastError, Events = status, Ready = status.Count(s => (string)JObject.FromObject(s)["Status"] == "Ready"), Total = sourceEvents.Count });
+            Save("readiness-metrics.json",new{Utc=DateTime.UtcNow,ElapsedMilliseconds=elapsed.Elapsed.TotalMilliseconds,SetupMilliseconds=setupMilliseconds,MaximumSliceMilliseconds=maximumSlice,Slices=slices,Assets=catalog.Count,SourceEvents=sourceEvents.Count,NativeEvents=native.Length});
+            assets.Dispose();_reconciling=false;
+             }catch(Exception ex){
+                assets.Dispose();_reconciling=false;_lastError=ex.Message;
+                try{Save("readiness-metrics.json",new{Utc=DateTime.UtcNow,Error=ex.ToString()});}catch{}
+                // Retain the last complete report. Never change Program or
+                // approve incomplete readiness after an inventory failure.
+             }
+            };
+            dispatcher.BeginInvoke(DispatcherPriority.Background,step);
         }
     }
 }

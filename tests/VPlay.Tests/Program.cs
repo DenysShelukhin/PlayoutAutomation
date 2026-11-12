@@ -8,6 +8,7 @@ using System.Runtime.Remoting.Messaging;
 using System.Runtime.Remoting.Proxies;
 using TAS.Common.Interfaces;
 using TAS.Common;
+using System.Linq;
 
 static class Program
 {
@@ -110,9 +111,45 @@ static class Program
         try { Validate.Invoke(null, new object[] { node, true, 0 }); } catch (TargetInvocationException e) when (e.InnerException is IOException) { failed = true; }
         if (failed != rejected) throw new Exception("FAIL: " + label); checks++; Console.WriteLine("PASS " + label);
     }
+    static void ReconcileIndexes()
+    {
+        var type=typeof(TAS.Client.VPlayMigration.Plugin);
+        var identity=(Func<string,string>)Delegate.CreateDelegate(typeof(Func<string,string>),type.GetMethod("NativeSourceIdentity",BindingFlags.Static|BindingFlags.NonPublic));
+        string id="0123456789abcdef0123456789abcdef";
+        foreach(var pair in new[]{new[]{"VP26E:"+id,id},new[]{"VP26T:prefix"+id,id},new[]{"VP26R:"+id,null},new[]{"VP26E:short",null},new string[]{null,null}}){
+            if(identity(pair[0])!=pair[1])throw new Exception("Reconcile native identity scope");checks++;Console.WriteLine("PASS indexed reconciliation preserves source identity scope");
+        }
+        var boundary=type.GetMethod("CanReconcile",BindingFlags.Static|BindingFlags.NonPublic);var now=DateTime.UtcNow;
+        foreach(var pair in new[]{new[]{0d,0d},new[]{1d,0d},new[]{2d,0d},new[]{2.001,1d},new[]{10d,1d}}){
+            if((bool)boundary.Invoke(null,new object[]{now,(DateTime?)now.AddSeconds(pair[0])})!=(pair[1]==1))throw new Exception("Reconciliation boundary guard");checks++;Console.WriteLine("PASS noncritical reconciliation defers near original air boundary");
+        }
+        if(!(bool)boundary.Invoke(null,new object[]{now,null}))throw new Exception("No boundary reconciliation");checks++;
+    }
+    static void ReconcileBenchmark(string[] args)
+    {
+        var source=JArray.Parse(File.ReadAllText(args[1]));var catalog=JArray.Parse(File.ReadAllText(args[2]));
+        var native=JArray.Parse(File.ReadAllText(args[3])).Select(x=>(string)x["IdAux"]).Where(x=>x!=null&&(x.StartsWith("VP26E:")||x.StartsWith("VP26T:"))).ToArray();
+        var method=typeof(TAS.Client.VPlayMigration.Plugin).GetMethod("NativeSourceIdentity",BindingFlags.Static|BindingFlags.NonPublic);
+        var identity=(Func<string,string>)Delegate.CreateDelegate(typeof(Func<string,string>),method);
+        var clock=System.Diagnostics.Stopwatch.StartNew();var before=new List<string>();
+        foreach(var asset in catalog){var key=(string)asset["Key"];foreach(var s in source.Where(s=>(string)s["AssetKey"]==key)){
+            if(!Guid.TryParse((string)asset["MediaGuid"],out var guid)||guid==Guid.Empty)continue;
+            var id=((string)s["ItemId"]).Replace("-","");foreach(var n in native.Where(n=>n.EndsWith(id,StringComparison.Ordinal)))before.Add(s["Sequence"]+":"+n);
+        }}
+        var legacy=clock.Elapsed.TotalMilliseconds;clock.Restart();var after=new List<string>();
+        var byAsset=source.ToLookup(s=>(string)s["AssetKey"],StringComparer.Ordinal);var byId=native.ToLookup(identity,StringComparer.Ordinal);
+        foreach(var asset in catalog)foreach(var s in byAsset[(string)asset["Key"]]){
+            if(!Guid.TryParse((string)asset["MediaGuid"],out var guid)||guid==Guid.Empty)continue;
+            foreach(var n in byId[((string)s["ItemId"]).Replace("-","")])after.Add(s["Sequence"]+":"+n);
+        }
+        var indexed=clock.Elapsed.TotalMilliseconds;if(before.Count==0||!before.SequenceEqual(after))throw new Exception("Actual reconciliation join mapping changed");
+        Console.WriteLine("Actual read-only joins: sources="+source.Count+", assets="+catalog.Count+", identity pairs="+after.Count+", legacyMs="+legacy.ToString("F3")+", indexedMs="+indexed.ToString("F3"));
+        Console.WriteLine("PASS identical ordered event/native identity pairs; no runtime or database mutation");
+    }
     [STAThread] static int Main(string[] args)
     {
         try {
+            if(args.Length==4&&args[0]=="--reconcile-joins"){ReconcileBenchmark(args);return 0;}
             var historical = JObject.Parse(File.ReadAllText(args[0])); var test = JObject.Parse(File.ReadAllText(args[1]));
             Check(historical, false, "Full source schedule: disabled fixed-time tree accepted");
             Check(test, false, "Manual sequential test accepted");
@@ -124,7 +161,7 @@ static class Program
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["IdAux"] = ""; Check(n, true, "Missing trace identity rejected");
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["SubEvents"] = null; Check(n, true, "Missing explicit leaf array rejected");
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["Duration"] = "-00:00:01"; Check(n, true, "Negative duration rejected");
-            Persistence(); CacheRules(); BoundedOverrides(); AbsoluteBackground(); Console.WriteLine(checks + " checks passed"); return 0;
+            Persistence(); CacheRules(); BoundedOverrides(); AbsoluteBackground(); ReconcileIndexes(); Console.WriteLine(checks + " checks passed"); return 0;
         } catch (Exception e) { Console.Error.WriteLine(e); return 1; }
     }
 }
