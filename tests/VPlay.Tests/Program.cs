@@ -13,6 +13,19 @@ using System.Linq;
 static class Program
 {
     static int checks;
+    private static void ModernCaspar()
+    {
+        Action<bool,string> check=(ok,label)=>{if(!ok)throw new Exception(label);checks++;Console.WriteLine("PASS "+label);};
+        var xml=new System.Xml.XmlDocument(); string path; long frame;
+        xml.LoadXml("<channel><stage><layer><layer_16><foreground><file><path>C:\\cache\\current.mov</path><time>13.18</time><time>3206.24</time></file></foreground><background><file><path>C:\\cache\\next.mov</path></file></background></layer_16></layer></stage></channel>");
+        check(TAS.Server.CasparPhysicalInfo.TryForeground(xml,16,400000,out path,out frame)&&frame==329&&path.EndsWith("current.mov"),"modern INFO uses first elapsed time, converted to engine frames");
+        check(TAS.Server.CasparPhysicalInfo.ProducerPaths(xml).Count()==2,"modern cache protects foreground and preloaded background paths");
+        check(!TAS.Server.CasparPhysicalInfo.TryForeground(xml,15,400000,out path,out frame),"missing layer is not mistaken for current foreground");
+        xml.LoadXml("<channel><stage><layers><layer><index>16</index><foreground><producer><type>transition-producer</type><destination><producer><filename>C:\\legacy.mov</filename><file-frame-number>125</file-frame-number></producer></destination></producer></foreground></layer></layers></stage></channel>");
+        check(TAS.Server.CasparPhysicalInfo.TryForeground(xml,16,400000,out path,out frame)&&frame==125,"legacy transition destination remains supported");
+        check(TAS.Server.CasparPhysicalInfo.CommandPosition(125,true,true)==250,"official interlaced seek uses field-rate units");
+        check(TAS.Server.CasparPhysicalInfo.CommandPosition(125,false,true)==125&&TAS.Server.CasparPhysicalInfo.CommandPosition(125,true,false)==125,"legacy and progressive seek units unchanged");
+    }
     private sealed class Stub : RealProxy, System.Runtime.Remoting.IRemotingTypeInfo
     {
         internal readonly Dictionary<string, object> Values = new Dictionary<string, object>();
@@ -60,6 +73,11 @@ static class Program
     {
         Action<bool,string> check=(ok,label)=>{if(!ok)throw new Exception(label);checks++;Console.WriteLine("PASS "+label);};
         long max=TAS.Server.PlayoutCacheRules.HardMaximum;
+        var priorityNow=DateTime.UtcNow;
+        check(TAS.Server.PlayoutCacheRules.CanDisplace(priorityNow.AddHours(48),priorityNow.AddMinutes(10),priorityNow),"cache can replace far future material for nearer airtime");
+        check(!TAS.Server.PlayoutCacheRules.CanDisplace(priorityNow.AddMinutes(4),priorityNow,priorityNow),"cache protects immediate five-minute horizon");
+        check(!TAS.Server.PlayoutCacheRules.CanDisplace(priorityNow.AddHours(1),priorityNow.AddHours(2),priorityNow),"cache never evicts nearer use for later material");
+        check(!TAS.Server.PlayoutCacheRules.CanDisplace(priorityNow,priorityNow.AddMinutes(1),priorityNow),"cache manual/current demand cannot be displaced");
         check(TAS.Server.PlayoutCacheRules.Fits(max,0,0,max),"cache exact decimal 200GB boundary");
         check(!TAS.Server.PlayoutCacheRules.Fits(max,0,1,max),"cache one byte over budget refused");
         check(!TAS.Server.PlayoutCacheRules.Fits(0,0,max+1,max),"oversized full file refused");
@@ -172,7 +190,7 @@ static class Program
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["IdAux"] = ""; Check(n, true, "Missing trace identity rejected");
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["SubEvents"] = null; Check(n, true, "Missing explicit leaf array rejected");
             n = (JObject)test.DeepClone(); n["SubEvents"][0]["Duration"] = "-00:00:01"; Check(n, true, "Negative duration rejected");
-            Persistence(); CacheRules(); BoundedOverrides(); AbsoluteBackground(); ReconcileIndexes(); Console.WriteLine(checks + " checks passed"); return 0;
+            Persistence(); CacheRules(); BoundedOverrides(); AbsoluteBackground(); ReconcileIndexes(); ModernCaspar(); Console.WriteLine(checks + " checks passed"); return 0;
         } catch (Exception e) { Console.Error.WriteLine(e); return 1; }
     }
 }

@@ -78,7 +78,7 @@ namespace TAS.Server
                 if(e.EventType==TEventType.Movie&&e.MediaGuid!=Guid.Empty&&(e.IsEnabled||(e.IdAux??"").StartsWith("VP26E:"))&&PlayoutCacheRules.InWindow(now,e.ScheduledTime,_settings.HorizonHours))
                     if(!result.ContainsKey(e.MediaGuid)||e.ScheduledTime<result[e.MediaGuid])result[e.MediaGuid]=e.ScheduledTime;
             }
-            lock(_sync)foreach(var pair in _demand.Where(p=>p.Value>=now).ToArray())if(!result.ContainsKey(pair.Key))result[pair.Key]=now;
+            lock(_sync)foreach(var pair in _demand.Where(p=>p.Value>=now).ToArray())result[pair.Key]=now;
             return result;
         }
         private bool Protected(Guid id,CacheEntry entry)
@@ -92,7 +92,7 @@ namespace TAS.Server
                 var stream=client.GetStream();stream.ReadTimeout=1000;var request=System.Text.Encoding.UTF8.GetBytes("INFO "+channel.Id+"\r\n");stream.Write(request,0,request.Length);
                 var data=new System.Text.StringBuilder();var buffer=new byte[16384];while(!data.ToString().Contains("</channel>")){var n=stream.Read(buffer,0,buffer.Length);if(n==0||data.Length>1048576)return true;data.Append(System.Text.Encoding.UTF8.GetString(buffer,0,n));}
                 var text=data.ToString();int begin=text.IndexOf("<?xml",StringComparison.Ordinal);if(begin<0)return true;var xml=new System.Xml.XmlDocument();xml.LoadXml(text.Substring(begin).Trim());
-                foreach(System.Xml.XmlNode file in xml.SelectNodes("//filename"))if(string.Equals(file.InnerText,Path.Combine(_root,entry.File),StringComparison.OrdinalIgnoreCase))return true;
+                foreach(var file in CasparPhysicalInfo.ProducerPaths(xml))if(string.Equals(file,Path.Combine(_root,entry.File),StringComparison.OrdinalIgnoreCase))return true;
             }return false;
         }
         private static bool References(object operation,Guid id)
@@ -130,6 +130,39 @@ namespace TAS.Server
             }
         }
         private CacheEntry[] Snapshot(){lock(_sync)return _entries.Values.ToArray();}
+        // A 72h request is preparation priority, not an indefinite eviction pin.
+        // Under pressure only displace a later use for an earlier one, retaining
+        // live/preloaded/native-operation/short-horizon and verified Archive guards.
+        private bool MakeRoom(Guid incomingId, DateTime incomingUse, long bytes)
+        {
+            if(bytes<0||bytes>_settings.MaxBytes)return false;
+            Func<bool> fits=()=>PlayoutCacheRules.Fits(Used(),0,bytes,_settings.MaxBytes)&&
+                new DriveInfo(Path.GetPathRoot(_root)).AvailableFreeSpace>=bytes+64L*1024*1024*1024;
+            if(fits())return true;
+            var requests=Requests();var local=(ServerDirectory)_manager.MediaDirectoryPRI;
+            var candidates=Snapshot().Where(e=>e.Guid!=incomingId&&requests.ContainsKey(e.Guid)&&
+                PlayoutCacheRules.CanDisplace(requests[e.Guid],incomingUse,_engine.CurrentTime))
+                .OrderByDescending(e=>requests[e.Guid]).ToArray();
+            foreach(var entry in candidates){
+                if(_disposed)return false;
+                var path=Path.Combine(_root,entry.File);var media=local.FindMediaByMediaGuid(entry.Guid) as MediaBase;
+                if(!Available(entry)||!ArchiveConfirmed(entry,media)||Protected(entry.Guid,entry))continue;
+                if(AtomicMediaCopy.Hash(path)!=entry.Hash)continue; // outside playback locks
+                lock(_engine.RundownSync) lock(IncomingMediaGate.Sync){
+                    var fresh=Requests();DateTime use;
+                    var owner=((CasparServerChannel)_engine.PlayoutChannelPRI).Owner;
+                    if(!fresh.TryGetValue(entry.Guid,out use)||!PlayoutCacheRules.CanDisplace(use,incomingUse,_engine.CurrentTime)||
+                        owner.ChannelsSer.Any(c=>!c.IsServerConnected||c.UsesMedia(entry.Guid))||
+                        Server.FileManager.Current.GetOperationQueue().Any(op=>References(op,entry.Guid))||
+                        !ArchiveConfirmed(entry,media)||!Available(entry))continue;
+                    IncomingFiles.Delete(_root,path,entry.Identity,null);
+                    lock(_sync)_entries.Remove(entry.Guid);Persist();
+                    Save("cache-last-eviction.json",new{Utc=DateTime.UtcNow,EvictedGuid=entry.Guid,NextUseUtc=use,IncomingGuid=incomingId,IncomingUseUtc=incomingUse,Reason="Capacity: earlier airtime replaces later cached use; permanent Library/Archive retained"});
+                }
+                if(fits())return true;
+            }
+            return fits();
+        }
         private void Persist()=>Save("cache-index.json",Snapshot());
         private void Save(string name,object value)
         {
@@ -152,6 +185,7 @@ namespace TAS.Server
                     var archive=(_manager.ArchiveDirectory as ArchiveDirectory)?.Find(pair.Key) as ArchiveMedia;if(archive==null||archive.MediaStatus!=TMediaStatus.Available||!archive.FileExists())continue;
                     var source=media.FullPath;var stamp=File.GetLastWriteTimeUtc(source).Ticks;var size=checked((long)media.FileSize);
                     var archivePath=archive.FullPath;var archiveStamp=File.GetLastWriteTimeUtc(archivePath).Ticks;
+                    if(!MakeRoom(pair.Key,pair.Value,size)){_error="Not Ready: cache capacity/reserve exhausted; all remaining candidates protected or earlier priority";break;}
                     using(var sourceLease=new FileStream(source,FileMode.Open,FileAccess.Read,FileShare.Read)) {
                     if(sourceLease.Length!=size)throw new IOException("Source byte count changed; cache reservation refused");
                     var hash=AtomicMediaCopy.Hash(source);

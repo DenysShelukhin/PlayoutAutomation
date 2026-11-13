@@ -45,6 +45,8 @@ namespace TAS.Server
         [DtoMember, Hibernate]
         public int Id { get; set; }
         public string PhysicalClockServerAddress=>Owner.ServerAddress;
+        private long CommandPosition(long frames)=>CasparPhysicalInfo.CommandPosition(frames,
+            Owner.CasparServerType==Svt.Caspar.ServerType.V2_2_Plus,VideoFormatDescription.Descriptions[VideoFormat].Interlaced);
 
         [DtoMember, Hibernate]
         public string ChannelName { get; set; }
@@ -142,7 +144,7 @@ namespace TAS.Server
             var item = _getItem(media, videolayer, seek);
             if (item == null)
                 return false;
-            item.Length = (int)duration;
+            item.Length = checked((int)CommandPosition(duration));
             _directMedia[videolayer]=media.MediaGuid;
             channel.Load(item);
             _visible.TryRemove(videolayer, out _);
@@ -197,7 +199,7 @@ namespace TAS.Server
             var channel = _casparChannel;
             if (!CheckConnected(channel))
                 return false;
-            channel.Seek((int)videolayer, (uint)position);
+            channel.Seek((int)videolayer, checked((uint)CommandPosition(position)));
             Logger.Trace("Seek Channel {0} Layer {1} Position {2}", Id, (int)videolayer, position);
             return true;
         }
@@ -207,7 +209,7 @@ namespace TAS.Server
             var channel = _casparChannel;
             if (!CheckConnected(channel))
                 return false;
-            var result = await channel.SeekAsync((int)videolayer, (uint)position);
+            var result = await channel.SeekAsync((int)videolayer, checked((uint)CommandPosition(position)));
             Logger.Trace("SeekAsync Channel {0} Layer {1} Position {2}", Id, (int)videolayer, position);
             return result;
         }
@@ -390,7 +392,7 @@ namespace TAS.Server
         {
             lock(IncomingMediaGate.Sync){
                 if(frame<0||frame>uint.MaxValue||!CheckConnected(_casparChannel)||!_visible.TryGetValue(ev.Layer,out var visible)||visible!=ev)return false;
-                _casparChannel.Seek((int)ev.Layer,(uint)frame);return true;
+                _casparChannel.Seek((int)ev.Layer,checked((uint)CommandPosition(frame)));return true;
             }
         }
 
@@ -406,7 +408,7 @@ namespace TAS.Server
                 return;
             var media = ev.Media;
             if (ev.EventType == TEventType.Movie && media != null)
-                item.Seek = (int)ev.Position + (int)((ev.ScheduledTc.Ticks - media.TcPlay.Ticks) / ev.Engine.FrameTicks);
+                item.Seek = checked((int)CommandPosition(ev.Position + (ev.ScheduledTc.Ticks - media.TcPlay.Ticks) / ev.Engine.FrameTicks));
             item.Transition.Duration = 3;
             item.Transition.Type = Svt.Caspar.TransitionType.MIX;
             if (start)
@@ -735,7 +737,7 @@ namespace TAS.Server
             item.Transition.Duration = (int)((aEvent.TransitionTime.Ticks - aEvent.TransitionPauseTime.Ticks) / aEvent.Engine.FrameTicks);
             item.Transition.Pause = (int)(aEvent.TransitionPauseTime.Ticks / aEvent.Engine.FrameTicks);
             item.Transition.Easing = (Svt.Caspar.Easing)aEvent.TransitionEasing;
-            item.Seek = (int)aEvent.MediaSeek;
+            item.Seek = checked((int)CommandPosition(aEvent.MediaSeek));
             return item;
         }
 
@@ -749,8 +751,8 @@ namespace TAS.Server
                     Clipname = BroadcastProducer($"\"{(media is ServerMedia ? Path.GetFileNameWithoutExtension(media.FileName) : media.FullPath)}\"", media),
                     ChannelLayout = GetAudioChannelLayout(),
                     VideoLayer = (int)videolayer,
-                    Seek = (int)seek,
-                    FieldOrderInverted = media.FieldOrderInverted
+                    Seek = checked((int)CommandPosition(seek)),
+                    FieldOrderInverted = Owner.CasparServerType.IsForkTVP() && media.FieldOrderInverted
                 };
             }
             return null;

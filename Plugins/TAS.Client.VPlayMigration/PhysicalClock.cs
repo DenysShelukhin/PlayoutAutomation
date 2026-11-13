@@ -47,10 +47,8 @@ namespace TAS.Client.VPlayMigration
                     }
                     var sampledAt=DateTime.UtcNow;var xml=new XmlDocument();int offset=response.IndexOf("<?xml",StringComparison.Ordinal);if(offset<0)return;
                     xml.LoadXml(response.Substring(offset).Trim());
-                    var producer=xml.SelectSingleNode("/channel/stage/layers/layer[index="+(int)ev.Layer+"]/foreground/producer");
-                    if(producer?.SelectSingleNode("type")?.InnerText=="transition-producer")producer=producer.SelectSingleNode("destination/producer");
-                    var actualPath=producer?.SelectSingleNode("filename")?.InnerText;long actual;
-                    if(actualPath==null||!long.TryParse(producer.SelectSingleNode("file-frame-number")?.InnerText,out actual))return;
+                    string actualPath;long actual;
+                    if(!TAS.Server.CasparPhysicalInfo.TryForeground(xml,(int)ev.Layer,engine.FrameTicks,out actualPath,out actual))return;
                     bool matched=string.Equals(Path.GetFullPath(actualPath),Path.GetFullPath(expected),StringComparison.OrdinalIgnoreCase);
                     long? requested=null;bool repaired=false;
                     if(sampledAt<end&&sampledAt-requestAt<TimeSpan.FromSeconds(1)&&sampledAt-_physicalCorrected>TimeSpan.FromSeconds(5)){
